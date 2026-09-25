@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kev 学習コントロール</title>
+<style>
+  :root {
+    --bg: #0b0e1a; --panel: #141a2e; --panel2: #1b2340; --line: #2a3560;
+    --text: #eef1ff; --muted: #8e98c4; --accent: #5ee7ff; --good: #6dff9c; --bad: #ff6b8a; --gold: #ffd166;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: system-ui, "Yu Gothic UI", "Meiryo", sans-serif;
+         padding: 24px 16px; }
+  main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+  h1 { font-size: 24px; } h1 span { color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; }
+  .label { font-size: 13px; color: var(--muted); font-weight: 700; letter-spacing: .05em; }
+  #state { display: flex; align-items: center; gap: 12px; font-size: 26px; font-weight: 800; margin-top: 6px; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--muted); }
+  .running .dot { background: var(--good); box-shadow: 0 0 12px var(--good); }
+  .paused .dot { background: var(--gold); }
+  .error .dot { background: var(--bad); }
+  #detail { margin-top: 8px; color: var(--muted); font-size: 16px; min-height: 1.4em; }
+  .bar { height: 10px; background: var(--panel2); border-radius: 5px; overflow: hidden; margin-top: 12px; }
+  .bar div { height: 100%; width: 0; background: linear-gradient(90deg, #2f8dff, var(--accent)); transition: width .4s; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 12px; }
+  button { font: inherit; font-size: 18px; font-weight: 800; padding: 14px 24px; border-radius: 12px; border: 0;
+           cursor: pointer; color: #07101a; min-width: 150px; }
+  button:disabled { opacity: .3; cursor: not-allowed; }
+  #start { background: var(--good); } #pause { background: var(--gold); } #resume { background: var(--accent); }
+  #stop { background: transparent; color: var(--bad); border: 2px solid var(--bad); }
+  #msg { color: var(--bad); min-height: 1.3em; font-size: 15px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 15px; }
+  th, td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 700; } th:first-child, td:first-child { text-align: left; }
+  .note { font-size: 13px; color: var(--muted); line-height: 1.7; }
+  code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1><span>Kev</span> 学習コントロール</h1>
+
+  <div class="panel" id="statuspanel">
+    <div class="label">学習の状態</div>
+    <div id="state"><div class="dot"></div><span id="statetext">-</span></div>
+    <div id="detail"></div>
+    <div class="bar"><div id="progress"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="buttons">
+      <button id="start">▶ 学習開始</button>
+      <button id="pause">⏸ 一時停止</button>
+      <button id="resume">▶ 再開</button>
+      <button id="stop">■ 停止</button>
+    </div>
+    <p id="msg"></p>
+    <p class="note">一時停止は次の1手の区切り(学習中なら学習プロセスごと)で止まり、GPUメモリは確保したままです。
+      停止すると途中の世代は捨てられ、次に「学習開始」を押すとその世代からやり直します。
+      設定: <code id="args"></code></p>
+  </div>
+
+  <div class="panel">
+    <div class="label">世代の記録(テスト成績)</div>
+    <table>
+      <thead><tr><th>世代</th><th>平均得点</th><th>最高得点</th><th>平均ライン</th><th>平均手数</th><th>学習した手</th><th>所要時間</th></tr></thead>
+      <tbody id="gens"><tr><td colspan="7">まだありません</td></tr></tbody>
+    </table>
+  </div>
+
+  <p class="note">配信画面(OBSのブラウザソース): <a href="/" target="_blank">http://127.0.0.1:8765/</a> ・ このページは配信には映りません。</p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const LABEL = { running: "学習中", paused: "一時停止中", stopped: "停止中", finished: "完了", error: "エラー" };
+const PHASE = { start: "起動", collect: "練習試合", train: "学習", test: "テスト", done: "完了", stopped: "停止", error: "エラー" };
+
+function render(s) {
+  const state = s.active ? (s.state === "paused" ? "paused" : "running") : (s.state === "error" ? "error" : s.state === "finished" ? "finished" : "stopped");
+  const pausing = s.active && s.command === "pause" && s.state !== "paused";
+  $("statuspanel").className = "panel " + state;
+  let text = LABEL[state] || "未開始";
+  if (!s.state) text = "未開始";
+  if (pausing) text = "一時停止の準備中…";
+  if (s.active && s.gen != null) text += ` ・ 第${s.gen}世代 ${PHASE[s.phase] || ""}`;
+  $("statetext").textContent = text;
+  $("detail").textContent = s.detail || "";
+  $("progress").style.width = s.progress == null ? "0" : (100 * s.progress) + "%";
+  $("start").disabled = s.active;
+  $("pause").disabled = !s.active || s.command === "pause";
+  $("resume").disabled = !s.active || s.command !== "pause";
+  $("stop").disabled = !s.active || s.command === "stop";
+  $("args").textContent = (s.args || []).join(" ");
+  const gens = s.generations || [];
+  $("gens").innerHTML = gens.length ? gens.map(g => {
+    const e = g.eval || {}, t = g.train || {};
+    return `<tr><td>第${g.gen}世代</td><td>${e.mean_score != null ? Math.round(e.mean_score).toLocaleString("ja-JP") : "-"}</td><td>${e.best_score != null ? e.best_score.toLocaleString("ja-JP") : "-"}</td><td>${e.mean_lines ?? "-"}</td><td>${e.mean_pieces ?? "-"}</td>
+      <td>${t.trained_on ?? "-"}</td><td>${t.minutes != null ? t.minutes + "分" : "-"}</td></tr>`;
+  }).join("") : '<tr><td colspan="7">まだありません</td></tr>';
+}
+async function refresh() {
+  try { render(await (await fetch("/api/train/status")).json()); } catch { $("statetext").textContent = "サーバーに接続できません"; }
+}
+async function act(action) {
+  $("msg").textContent = "";
+  const r = await fetch(`/api/train/${action}`, { method: "POST", headers: { "x-kev-control": "1" } });
+  const s = await r.json();
+  if (s.message) $("msg").textContent = s.message;
+  render(s);
+}
+for (const a of ["start", "pause", "resume", "stop"]) $(a).onclick = () => {
+  if (a === "stop" && !confirm("学習を停止します。途中の世代は捨てられます。よろしいですか?")) return;
+  act(a);
+};
+refresh(); setInterval(refresh, 1000);
+</script>
+</body>
+</html>

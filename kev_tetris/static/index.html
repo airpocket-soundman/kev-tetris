@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>Kev Tetris Live</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0e1a; --panel: #141a2e; --panel2: #1b2340; --line: #2a3560;
+    --text: #eef1ff; --muted: #8e98c4; --accent: #5ee7ff; --good: #6dff9c; --bad: #ff6b8a; --gold: #ffd166;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; background: var(--bg); overflow: hidden; }
+  body { font-family: "M PLUS 1p", system-ui, sans-serif; color: var(--text); }
+  #stage { width: 1920px; height: 1080px; position: absolute; left: 0; top: 0; transform-origin: 0 0;
+           display: grid; grid-template-columns: 560px 1fr 560px; gap: 36px; padding: 40px 48px;
+           background: radial-gradient(1200px 700px at 50% 20%, #17204a 0%, var(--bg) 70%); }
+  .panel { background: var(--panel); border: 2px solid var(--line); border-radius: 22px; padding: 26px 30px; }
+  .label { font-size: 20px; color: var(--muted); font-weight: 700; letter-spacing: .06em; }
+  .mono { font-family: "JetBrains Mono", monospace; }
+  .col { display: flex; flex-direction: column; gap: 24px; min-height: 0; }
+
+  /* generation card */
+  #gencard { position: relative; overflow: hidden; }
+  #gencard .big { font-size: 118px; font-weight: 900; line-height: 1.05; letter-spacing: -.02em; }
+  #gencard .big small { font-size: 46px; font-weight: 700; color: var(--muted); margin: 0 6px; }
+  #gencard .tag { display: inline-block; font-size: 20px; font-weight: 700; padding: 4px 14px; border-radius: 999px;
+                  background: var(--panel2); border: 1px solid var(--line); color: var(--accent); margin-right: 8px; }
+  #gencard .tag.gold { color: #1a1300; background: var(--gold); border-color: var(--gold); }
+  .rows { margin-top: 18px; display: grid; grid-template-columns: auto 1fr; gap: 10px 18px; font-size: 24px; }
+  .rows dt { color: var(--muted); } .rows dd { font-weight: 700; text-align: right; }
+  .delta.up { color: var(--good); } .delta.down { color: var(--bad); }
+
+  /* score chart: two series, one axis (lines cleared); colours validated for this surface (dataviz validator) */
+  :root { --s-mean: #1f94c4; --s-best: #c77a22; --grid: #232c4d; }
+  #chartpanel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #legend { display: flex; gap: 22px; margin-top: 12px; font-size: 19px; color: var(--muted); font-weight: 700; }
+  #legend i { display: inline-block; width: 26px; height: 4px; border-radius: 2px; vertical-align: middle; margin-right: 8px; }
+  /* two stacked charts sharing the generation axis (score on top, lines below) instead of one chart with two y-axes */
+  .chart { flex: 1; min-height: 0; }
+  .chart svg { display: block; width: 100%; height: 100%; }
+  .chart text { font-family: "JetBrains Mono", monospace; font-size: 16px; fill: var(--muted); }
+  .chart text.val { fill: var(--text); font-weight: 700; font-size: 18px; }
+  .chart .empty { font-family: "M PLUS 1p", sans-serif; font-size: 18px; }
+  .csub { font-size: 17px; color: var(--muted); font-weight: 700; margin-top: 8px; }
+
+  /* training progress */
+  #growpanel { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .growtop { display: flex; align-items: baseline; gap: 16px; margin-top: 4px; }
+  #genpct { font-size: 64px; font-weight: 900; font-family: "JetBrains Mono", monospace; line-height: 1.1; }
+  .steps { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  .step { display: grid; grid-template-columns: 1fr 76px; gap: 2px 12px; align-items: center; }
+  .step .name { font-size: 21px; font-weight: 700; color: var(--muted); }
+  .step .name small { font-size: 16px; font-weight: 500; margin-left: 8px; }
+  .step .p { text-align: right; font-family: "JetBrains Mono", monospace; font-size: 20px; font-weight: 700; color: var(--muted); }
+  .step .track { grid-column: 1 / 3; height: 10px; border-radius: 5px; background: var(--panel2); overflow: hidden; }
+  .step .fill { height: 100%; border-radius: 5px; background: #4a5aa0; transition: width .5s; }
+  .step.current .name, .step.current .p { color: var(--text); }
+  .step.current .fill { background: linear-gradient(90deg, #2f8dff, var(--accent)); }
+  .step.done .fill { background: var(--good); opacity: .6; }
+  .step .fill.measuring { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
+  @keyframes slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+  #grownote { margin-top: 8px; font-size: 18px; color: var(--muted); min-height: 1.3em; }
+  #turnsmall { margin-top: auto; padding-top: 8px; font-size: 17px; color: var(--muted); }
+
+  /* board */
+  #center { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  #title { font-size: 36px; font-weight: 900; letter-spacing: .02em; line-height: 1.2; }
+  #title span { color: var(--accent); }
+  #boardwrap { position: relative; padding: 10px; border-radius: 18px; background: #070913; border: 3px solid var(--line);
+               box-shadow: 0 0 60px #2f8dff33; }
+  canvas { display: block; }
+  #overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+             background: #070913e6; border-radius: 16px; opacity: 0; transition: opacity .35s; pointer-events: none; text-align: center; }
+  #overlay.show { opacity: 1; }
+  #recall { position: absolute; left: 10px; right: 10px; top: 40%; padding: 20px 0; text-align: center; font-size: 44px; line-height: 1.35; white-space: nowrap;
+            font-weight: 900; letter-spacing: .06em; color: var(--text); background: #070913c4; border-top: 2px solid var(--accent);
+            border-bottom: 2px solid var(--accent); text-shadow: 0 0 24px #5ee7ff99; opacity: 0; transition: opacity .5s; pointer-events: none; }
+  #recall.show { opacity: 1; }
+  #overlay .o1 { font-size: 34px; color: var(--muted); font-weight: 700; }
+  #overlay .o2 { font-size: 88px; font-weight: 900; margin: 6px 0; }
+  #overlay .o3 { font-size: 28px; color: var(--accent); font-weight: 700; padding: 0 20px; }
+
+  /* right */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  .stat { background: var(--panel2); border-radius: 14px; padding: 12px 16px; }
+  .stat .n { font-size: 44px; font-weight: 700; font-family: "JetBrains Mono", monospace; }
+  #nextpiece { display: flex; align-items: center; gap: 24px; }
+  .think { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .cand { display: grid; grid-template-columns: 30px 1fr 86px; align-items: center; gap: 12px; font-size: 22px; }
+  .cand .rank { font-weight: 900; color: var(--muted); }
+  .cand .track { height: 26px; border-radius: 8px; background: var(--panel2); overflow: hidden; }
+  .cand .fill { height: 100%; background: #4a5aa0; border-radius: 8px; transition: width .25s; }
+  .cand.chosen .fill { background: linear-gradient(90deg, #2f8dff, var(--accent)); }
+  .cand.chosen .rank { color: var(--accent); }
+  .cand .p { text-align: right; font-family: "JetBrains Mono", monospace; font-weight: 700; }
+  #mood { margin-top: 12px; font-size: 22px; color: var(--muted); }
+  #cycle { display: flex; align-items: stretch; gap: 6px; width: 100%; }
+  .cstep { flex: 1; border-radius: 14px; padding: 8px 10px 9px; background: var(--panel); border: 2px solid var(--line);
+           display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .cstep .t { font-size: 21px; font-weight: 900; color: var(--muted); white-space: nowrap; }
+  .cstep .t span { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; margin-right: 6px;
+                   background: var(--panel2); font-size: 16px; }
+  .cstep .d { font-size: 15px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cstep .bar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; margin-top: 2px; }
+  .cstep .bar div { height: 100%; width: 0; border-radius: 3px; transition: width .5s; }
+  .cstep.done { border-color: #2f6b4a; }
+  .cstep.done .t { color: var(--good); } .cstep.done .t span { background: #1f4a35; }
+  .cstep.done .bar div { background: var(--good); opacity: .6; }
+  .cstep.current { border-color: var(--accent); background: #16284a; box-shadow: 0 0 22px #5ee7ff55; }
+  .cstep.current .t { color: var(--text); } .cstep.current .t span { background: var(--accent); color: #07101a; }
+  .cstep.current .d { color: var(--accent); font-weight: 700; }
+  .cstep.current .bar div { background: linear-gradient(90deg, #2f8dff, var(--accent)); }
+  .cstep.current .bar div.measuring { width: 30% !important; animation: slide 1.4s ease-in-out infinite; }
+  .cstep.skip { opacity: .35; border-style: dashed; }
+  .cstep.paused { border-color: var(--gold); box-shadow: none; }
+  .cstep.paused .d { color: var(--gold); }
+  .carrow { align-self: center; font-size: 22px; color: var(--muted); font-weight: 900; }
+  .carrow.loop { font-size: 15px; line-height: 1.2; text-align: center; writing-mode: horizontal-tb; }
+  #cycle.idle .cstep { opacity: .5; }
+  #conn { position: absolute; right: 18px; bottom: 10px; font-size: 16px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- left: who is playing -->
+  <div class="col">
+    <div class="panel" id="gencard">
+      <div class="label">いまプレイ中</div>
+      <div class="big">第<span id="gno">-</span><small>世代</small></div>
+      <div id="tags"></div>
+      <dl class="rows">
+        <dt>AIモデル</dt><dd id="model">-</dd>
+        <dt>これまでの練習</dt><dd id="practice">-</dd>
+        <dt>学習した手</dt><dd id="learned">-</dd>
+        <dt>テスト平均</dt><dd><span id="evalv">-</span> <span id="delta" class="delta"></span></dd>
+      </dl>
+    </div>
+    <div class="panel" id="chartpanel">
+      <div class="label">世代ごとのテスト成績(1ゲーム最大500手)</div>
+      <div id="legend"><span><i style="background:var(--s-mean)"></i>平均</span><span><i style="background:var(--s-best)"></i>最高</span></div>
+      <div class="csub">ゲームの得点</div>
+      <div class="chart" id="chartScore"></div>
+      <div class="csub">消したライン数</div>
+      <div class="chart" id="chartLines"></div>
+    </div>
+  </div>
+
+  <!-- center: the board -->
+  <div id="center">
+    <div id="title"><span>Kev</span> がテトリスを練習中</div>
+    <div id="cycle" class="idle"></div>
+    <div id="boardwrap">
+      <canvas id="board" width="400" height="800"></canvas>
+      <div id="recall">学習待ちの間<br>回想中です。</div>
+      <div id="overlay"><div class="o1" id="o1"></div><div class="o2" id="o2"></div><div class="o3" id="o3"></div></div>
+    </div>
+  </div>
+
+  <!-- right: the game -->
+  <div class="col">
+    <div class="panel">
+      <div id="nextpiece"><div class="label">NEXT</div><canvas id="next" width="176" height="88"></canvas></div>
+      <div class="stats">
+        <div class="stat"><div class="label">スコア</div><div class="n" id="score">0</div></div>
+        <div class="stat"><div class="label">消したライン</div><div class="n" id="lines">0</div></div>
+        <div class="stat"><div class="label">置いたブロック</div><div class="n" id="pieces">0</div></div>
+        <div class="stat"><div class="label">テトリス(4列消し)</div><div class="n" id="tetrises">0</div></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="label">Kev の考え(置き場所の候補と自信)</div>
+      <div class="think" id="think"></div>
+      <div id="mood">-</div>
+    </div>
+    <div class="panel" id="growpanel">
+      <div class="label" id="growlabel">育成の進み具合</div>
+      <div class="growtop"><span id="genpct">-</span></div>
+      <div class="steps" id="steps"></div>
+      <div id="grownote"></div>
+      <div id="turnsmall"></div>
+    </div>
+  </div>
+  <div id="conn">接続中…</div>
+</div>
+
+<script>
+const COLORS = [null, "#35e0ff", "#ffd84a", "#c46bff", "#5dff8a", "#ff5a78", "#4f7bff", "#ff9f40"];
+const W = 10, H = 20, CELL = 40, BW = W * CELL, BH = H * CELL;
+const $ = id => document.getElementById(id);
+const bctx = $("board").getContext("2d"), nctx = $("next").getContext("2d");
+const SHAPES = { I: [[0,0],[1,0],[2,0],[3,0]], O: [[0,0],[1,0],[0,1],[1,1]], T: [[0,0],[1,0],[2,0],[1,1]],
+  S: [[1,0],[2,0],[0,1],[1,1]], Z: [[0,0],[1,0],[1,1],[2,1]], J: [[0,0],[0,1],[1,1],[2,1]], L: [[2,0],[0,1],[1,1],[2,1]] };
+const PIECES = "IOTSZJL";
+let state = { gens: [], live: {}, gen: null, pieces_per_gen: null };
+
+function fit() {
+  const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+  const st = $("stage"); st.style.transform = `scale(${s})`;
+  st.style.left = (innerWidth - 1920 * s) / 2 + "px"; st.style.top = (innerHeight - 1080 * s) / 2 + "px";
+}
+addEventListener("resize", () => { fit(); drawChart(); }); fit();
+
+function cell(ctx, x, y, color, size = CELL, alpha = 1) {
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color; ctx.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
+  ctx.fillStyle = "rgba(255,255,255,.22)"; ctx.fillRect(x * size + 1, y * size + 1, size - 2, 6);
+  ctx.fillStyle = "rgba(0,0,0,.25)"; ctx.fillRect(x * size + 1, y * size + size - 7, size - 2, 6);
+  ctx.globalAlpha = 1;
+}
+function outline(ctx, cells, color, width = 3) {
+  ctx.strokeStyle = color; ctx.lineWidth = width;
+  for (const [x, y] of cells) ctx.strokeRect(x * CELL + 3, y * CELL + 3, CELL - 6, CELL - 6);
+}
+function drawBoard(board, extra) {
+  bctx.fillStyle = "#070913"; bctx.fillRect(0, 0, BW, BH);
+  bctx.strokeStyle = "#141a33"; bctx.lineWidth = 1;
+  for (let x = 1; x < W; x++) { bctx.beginPath(); bctx.moveTo(x * CELL, 0); bctx.lineTo(x * CELL, BH); bctx.stroke(); }
+  for (let y = 1; y < H; y++) { bctx.beginPath(); bctx.moveTo(0, y * CELL); bctx.lineTo(BW, y * CELL); bctx.stroke(); }
+  if (!board) return;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (board[y][x]) cell(bctx, x, y, COLORS[board[y][x]]);
+  if (extra) extra();
+}
+function drawNext(p) {
+  nctx.clearRect(0, 0, 176, 88);
+  if (!p) return;
+  const s = SHAPES[p], w = Math.max(...s.map(c => c[0])) + 1, h = Math.max(...s.map(c => c[1])) + 1, size = 40;
+  const ox = (176 - w * size) / 2 / size, oy = (88 - h * size) / 2 / size;
+  for (const [x, y] of s) { nctx.save(); nctx.translate(ox * size, oy * size); cell(nctx, x, y, COLORS[PIECES.indexOf(p) + 1], size); nctx.restore(); }
+}
+const fmt = n => n == null ? "-" : Number(n).toLocaleString("ja-JP");
+
+function showGen(g) {
+  state.gen = g;
+  $("gno").textContent = g.gen;
+  $("model").textContent = g.model;
+  const tags = [];
+  if (g.mode === "live") tags.push('<span class="tag">● ライブ</span>');
+  if (g.mode === "practice") tags.push(`<span class="tag gold">● 練習試合中(第${g.training_gen}世代を育成中)</span>`);
+  if (g.mode === "test") tags.push('<span class="tag gold">● 実力テスト中</span>');
+  if (g.mode === "replay") tags.push('<span class="tag">録画(テスト時のプレイ)</span>');
+  if (g.gen === 0) tags.push('<span class="tag">学習前(そのままのKev)</span>');
+  if (g.latest && g.gen > 0) tags.push('<span class="tag gold">最新・いちばん賢い</span>');
+  tags.push(`<span class="tag">全${g.total_gens}世代</span>`);
+  $("tags").innerHTML = tags.join("");
+  $("practice").textContent = g.cumulative_episodes ? `${fmt(g.cumulative_episodes)} ゲーム` : "まだなし";
+  $("learned").textContent = g.train ? `${fmt(g.train.trained_on ?? g.train.records)} 手` : "まだなし";
+  $("evalv").textContent = g.eval && g.eval.mean_score != null ? `${fmt(Math.round(g.eval.mean_score))} 点` : "-";
+  const d = $("delta");
+  if (g.delta_score == null) { d.textContent = ""; d.className = "delta"; }
+  else { d.textContent = `(前世代 ${g.delta_score >= 0 ? "+" : ""}${fmt(g.delta_score)})`; d.className = "delta " + (g.delta_score >= 0 ? "up" : "down"); }
+  drawChart();
+}
+function drawChart() {
+  plot($("chartScore"), "mean_score", "best_score", [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000], 400, false);
+  plot($("chartLines"), "mean_lines", "best_lines", [1, 2, 5, 10, 20, 25, 50, 100, 200, 500], 4, true);
+}
+function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels) {
+  const W = el.clientWidth, H = el.clientHeight;
+  const gens = state.gens.filter(g => g[meanKey] != null);
+  if (!W || !H) return;
+  if (!gens.length) { el.innerHTML = `<svg viewBox="0 0 ${W} ${H}"><text class="empty" x="${W / 2}" y="${H / 2}" text-anchor="middle">最初のテストが終わると表示されます</text></svg>`; return; }
+  const m = { l: 66, r: 84, t: 12, b: xLabels ? 28 : 8 };
+  const maxGen = Math.max(1, ...state.gens.map(g => g.gen)), minGen = Math.min(...state.gens.map(g => g.gen));
+  const top = Math.max(minTop, ...gens.map(g => g[bestKey] ?? g[meanKey]));
+  const stepY = niceSteps.find(v => top / v <= 3) || niceSteps[niceSteps.length - 1] * 2, yMax = Math.ceil(top / stepY) * stepY;
+  const x = g => m.l + (W - m.l - m.r) * (maxGen === minGen ? 0.5 : (g - minGen) / (maxGen - minGen));
+  const y = v => H - m.b - (H - m.t - m.b) * v / yMax;
+  let svg = "";
+  for (let v = 0; v <= yMax; v += stepY)
+    svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l - 10}" y="${y(v) + 6}" text-anchor="end">${fmt(v)}</text>`;
+  if (xLabels) {
+    const every = maxGen - minGen > 10 ? 2 : 1;
+    for (let g = minGen; g <= maxGen; g += every) svg += `<text x="${x(g)}" y="${H - 6}" text-anchor="middle">${g}</text>`;
+  }
+  const now = state.gen ? state.gen.gen : null;
+  for (const [key, color] of [[bestKey, "var(--s-best)"], [meanKey, "var(--s-mean)"]]) {
+    const pts = gens.filter(g => g[key] != null);
+    if (pts.length > 1) svg += `<polyline fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(g => `${x(g.gen)},${y(g[key])}`).join(" ")}"/>`;
+    for (const g of pts) svg += `<circle cx="${x(g.gen)}" cy="${y(g[key])}" r="${g.gen === now ? 7 : 5}" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+    const last = pts[pts.length - 1];   // direct label on the latest point only
+    if (last) svg += `<text class="val" x="${x(last.gen) + 12}" y="${y(last[key]) + 6}">${fmt(Math.round(last[key]))}</text>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>`;
+}
+function overlay(o1, o2, o3) {
+  if (!o1 && !o2) { $("overlay").classList.remove("show"); return; }
+  $("o1").textContent = o1 || ""; $("o2").textContent = o2 || ""; $("o3").textContent = o3 || "";
+  $("overlay").classList.add("show");
+}
+const STEP_HINT = { collect: "いろいろな手を試す", train: "良かった手を覚える", test: "本気で実力を測る" };
+function showProgress(t) {
+  const v = t && t.progress_view;
+  if (!t || !t.active || !v || !v.phases) {
+    $("growlabel").textContent = "育成の進み具合";
+    $("genpct").textContent = "休止中";
+    $("steps").innerHTML = ""; $("grownote").textContent = "学習はいま動いていません"; return;
+  }
+  if (v.gen == null) { $("growlabel").textContent = "育成の準備中"; $("genpct").textContent = "-"; $("steps").innerHTML = ""; $("grownote").textContent = v.note || ""; return; }
+  $("growlabel").textContent = v.gen === 0 ? "第0世代(学習前)の実力測定" : `第${v.gen}世代の育成${v.paused ? "(一時停止中)" : ""}`;
+  $("genpct").textContent = Math.floor(v.gen_pct * 100) + "%";
+  const cur = v.phases.find(ph => ph.state === "current");
+  $("steps").innerHTML = `<div class="step current"><div class="name">いまの段階: ${cur ? cur.label : "準備中"}</div>
+    <div class="p">${cur && cur.pct != null ? Math.floor(cur.pct * 100) + "%" : ""}</div>
+    <div class="track"><div class="fill${cur && cur.pct == null ? " measuring" : ""}" style="width:${cur && cur.pct != null ? cur.pct * 100 : 30}%"></div></div></div>`;
+  $("grownote").textContent = v.note || "";
+}
+function showCycle(t) {
+  const v = t && t.progress_view, el = $("cycle");
+  const phases = v && v.phases && v.phases.length ? v.phases
+    : [{ key: "collect", label: "練習試合", state: "todo" }, { key: "train", label: "学習", state: "todo" }, { key: "test", label: "実力テスト", state: "todo" }];
+  el.className = t && t.active ? "" : "idle";
+  const games = ((v && v.detail) || "").match(/(\d+)\/(\d+) ゲーム目/);
+  const box = (ph, i) => {
+    let d = STEP_HINT[ph.key], pct = ph.pct;
+    if (ph.state === "done") d = "完了";
+    else if (ph.state === "skip") d = "なし(学習前)";
+    else if (ph.state === "current") {
+      if (v.paused) d = "一時停止中";
+      else if (ph.key === "train") d = v.note || "学習中";
+      else if (games) d = `${games[1]}/${games[2]} ゲーム目・${Math.floor((pct || 0) * 100)}%`;
+      else d = "準備中";
+    } else if (!(t && t.active)) d = "休止中";
+    const measuring = ph.state === "current" && pct == null;
+    const w = ph.state === "done" ? 100 : ph.state === "current" ? (pct || 0) * 100 : 0;
+    const cls = ph.state + (ph.state === "current" && v.paused ? " paused" : "");
+    return `<div class="cstep ${cls}"><div class="t"><span>${ph.state === "done" ? "✓" : i + 1}</span>${ph.label}</div>
+      <div class="d">${d}</div><div class="bar"><div class="${measuring ? "measuring" : ""}" style="width:${w}%"></div></div></div>`;
+  };
+  el.innerHTML = phases.map(box).join('<div class="carrow">→</div>') + '<div class="carrow loop">↻<br>次の<br>世代へ</div>';
+}
+function showThinking(m) {
+  const t = m.thinking || [];
+  // always three rows (blank ones hidden) so the card keeps its height when there are fewer candidates
+  $("think").innerHTML = [0, 1, 2].map(i => {
+    const c = t[i];
+    if (!c) return `<div class="cand" style="visibility:hidden"><div class="rank">${i + 1}</div><div class="track"></div><div class="p">0%</div></div>`;
+    return `<div class="cand${c.chosen ? " chosen" : ""}"><div class="rank">${i + 1}</div>
+    <div class="track"><div class="fill" style="width:${(c.p * 100).toFixed(1)}%"></div></div><div class="p">${(c.p * 100).toFixed(0)}%</div></div>`;
+  }).join("");
+  if (!t.length) { $("mood").textContent = "-"; return; }
+  const p = t[0].p;
+  const mood = p > 0.7 ? "迷いなし!" : p > 0.4 ? "だいたい決まり" : p > 0.2 ? "ちょっと迷い中…" : "かなり迷っている…";
+  $("mood").textContent = `${mood}  ・ 思考時間 ${m.latency_ms} ms`;
+}
+function showStats(m) {
+  $("score").textContent = fmt(m.score); $("lines").textContent = fmt(m.lines);
+  $("pieces").textContent = fmt(m.pieces); $("tetrises").textContent = fmt(m.tetrises);
+  drawNext(m.next);
+  if (m.turn_text) { $("turnsmall").textContent = `いま: ${m.turn_text}`; return; }   // following the training loop
+  const left = Math.max(0, m.left);
+  const mode = state.gen && state.gen.mode === "replay" ? "録画再生" : "プレイ";
+  $("turnsmall").textContent = m.next_gen == null ? `この${mode}は あと${left}手で最初の世代に戻ります` : `この${mode}は あと${left}手で 第${m.next_gen}世代 に交代`;
+}
+
+// moves are animated one after another; if they pile up, animations get shorter
+const moves = []; let busy = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function animate(m) {
+  showStats(m); showThinking(m);
+  if (!m.piece) { drawBoard(m.board); return; }
+  const fast = moves.length > 2 ? 0.3 : 1;
+  const alt = (m.thinking || []).filter(c => !c.chosen).map(c => c.cells);
+  drawBoard(m.board, () => alt.forEach(cs => outline(bctx, cs, "rgba(142,152,196,.7)", 2)));
+  await sleep(55 * fast);
+  const minY = Math.min(...m.cells.map(c => c[1])), steps = 6;
+  for (let i = 0; i <= steps; i++) {
+    const dy = Math.round(-(minY + 1) * (1 - i / steps));
+    drawBoard(m.board, () => { for (const [x, y] of m.cells) if (y + dy >= 0) cell(bctx, x, y + dy, COLORS[m.color]); });
+    await sleep(7 * fast);
+  }
+  if (m.cleared && m.cleared.length) {
+    drawBoard(m.board, () => {
+      for (const [x, y] of m.cells) cell(bctx, x, y, COLORS[m.color]);
+      for (const y of m.cleared) { bctx.fillStyle = "rgba(255,255,255,.85)"; bctx.fillRect(0, y * CELL, BW, CELL); }
+    });
+    await sleep(80 * fast);
+  }
+  drawBoard(m.post);
+}
+async function pump() {
+  if (busy) return; busy = true;
+  while (moves.length) {
+    const m = moves.shift();
+    if (m.type === "move") await animate(m);
+    else await m.run();
+  }
+  busy = false;
+}
+const later = run => { moves.push({ run }); pump(); };
+
+let lastGenKey = null;
+function connect() {
+  const es = new EventSource("/events");
+  es.onopen = () => $("conn").textContent = "LIVE";
+  es.onerror = () => { $("conn").textContent = "再接続中…"; };
+  es.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "gens") { state.gens = m.gens; drawChart(); }
+    else if (m.type === "switch") later(async () => {
+      if (m.to) showGen(m.to);
+      overlay("世代交代", m.to ? `第${m.to.gen}世代` : "", m.message);
+    });
+    else if (m.type === "gen") later(async () => {
+      const key = `${m.gen}/${m.mode}`, same = key === lastGenKey; lastGenKey = key;
+      showGen(m);
+      if (same) { overlay(); return; }
+      if (m.mode === "practice" || m.mode === "test") {
+        overlay(m.mode === "practice" ? "練習試合スタート" : "実力テスト", `第${m.gen}世代`,
+                m.mode === "practice" ? `ここでの良い手を覚えて 第${m.training_gen}世代 に進化します` : `${m.games}ゲーム(各最大500手)の平均得点で成績を測ります`);
+        await sleep(2000); overlay(); return;
+      }
+      overlay("登場!", `第${m.gen}世代`, m.gen === 0 ? "まだ何も練習していない Kev" : `テスト平均 ${m.eval?.mean_score != null ? fmt(Math.round(m.eval.mean_score)) : "?"} 点`);
+      await sleep(1600); overlay();
+    });
+    else if (m.type === "move") {
+      moves.push(m);
+      const queued = moves.filter(x => x.type === "move");
+      if (queued.length > 4) moves.splice(moves.indexOf(queued[0]), 1);   // every move carries whole boards: dropping one is safe
+      pump();
+    }
+    else if (m.type === "train") {
+      showProgress(m); showCycle(m);
+      $("recall").classList.toggle("show", !!m.active && m.phase === "train");   // learning: the board shows recordings
+    }
+    else if (m.type === "result") later(async () => {
+      overlay(`第${m.gen}世代の結果`, `${m.lines} ライン`, m.over ? `${m.pieces}手目でゲームオーバー` : `${m.pieces}手 置き切った!`);
+      await sleep(2400);
+    });
+  };
+}
+drawBoard(null); showCycle(null); connect();
+</script>
+</body>
+</html>

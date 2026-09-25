@@ -1,0 +1,12 @@
+[project]
+name = "kev-tetris"
+version = "0.1.0"
+description = "Tetris with a decision-model interface, played and trained (RL) with Kev"
+requires-python = ">=3.12"
+# Kev itself runs from its own deployed checkout and venv (kev_tetris/kevenv.py, docs/kev-local-deployment.md)
+dependencies = [
+    "numpy>=2",
+]
+
+[tool.uv]
+package = false

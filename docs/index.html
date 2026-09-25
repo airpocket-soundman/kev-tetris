@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kev テトリス強化学習</title>
+<meta name="description" content="ローカルの決定モデル Kev にテトリスを強化学習で覚えさせるプロジェクトの、学習計画・報酬設計・成績・実行環境・今後の計画">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+1p:wght@400;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f6f7fb; --surface: #ffffff; --surface2: #eef0f7; --line: #d9ddea;
+    --text: #151a2e; --muted: #5b6380; --accent: #1668b8;
+    --s1: #1f94c4; --s2: #c77a22; --grid: #e3e6f0;
+    --good: #1e7a4c; --warn: #9a5b00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0b0e1a; --surface: #141a2e; --surface2: #1b2340; --line: #2a3560;
+      --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff;
+      --grid: #232c4d; --good: #6dff9c; --warn: #ffd166;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0e1a; --surface: #141a2e; --surface2: #1b2340; --line: #2a3560;
+    --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff;
+    --grid: #232c4d; --good: #6dff9c; --warn: #ffd166;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: "M PLUS 1p", system-ui, sans-serif; line-height: 1.75; }
+  main { max-width: 1040px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: clamp(28px, 5vw, 42px); font-weight: 900; line-height: 1.25; margin: 0 0 8px; }
+  h1 span { color: var(--accent); }
+  h2 { font-size: 24px; font-weight: 900; margin: 56px 0 14px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 18px; margin: 26px 0 8px; }
+  p { margin: 8px 0; }
+  .lead { color: var(--muted); font-size: 17px; }
+  .meta { color: var(--muted); font-size: 14px; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 20px 0 0; font-size: 15px; }
+  nav a { color: var(--accent); text-decoration: none; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; margin: 14px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .kpi .v { font-size: 30px; font-weight: 900; font-family: "JetBrains Mono", monospace; }
+  .kpi .l { color: var(--muted); font-size: 14px; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .step { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+  .step b { display: block; font-size: 17px; }
+  .step .n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
+             color: var(--bg); font-weight: 900; font-size: 14px; margin-right: 6px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 700; background: var(--surface2); }
+  td.num { text-align: right; font-family: "JetBrains Mono", monospace; }
+  tr:last-child td { border-bottom: 0; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.v1 { border-color: var(--s1); } .tag.v2 { border-color: var(--s2); }
+  .hl { font-weight: 700; color: var(--accent); }
+  .chart { width: 100%; height: 280px; }
+  .chart text { font-family: "JetBrains Mono", monospace; font-size: 12px; fill: var(--muted); }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; color: var(--muted); }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; }
+  .timeline { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--line); }
+  .timeline li { position: relative; padding: 0 0 16px 22px; }
+  .timeline li::before { content: ""; position: absolute; left: -7px; top: 8px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+  .timeline li.todo::before { background: var(--surface); border: 2px solid var(--muted); }
+  .timeline b { display: block; }
+  .status { font-weight: 700; font-size: 13px; }
+  .status.done { color: var(--good); } .status.now { color: var(--accent); } .status.next { color: var(--warn); }
+  code { font-family: "JetBrains Mono", monospace; font-size: 0.9em; background: var(--surface2); padding: 1px 6px; border-radius: 5px; }
+  footer { margin-top: 64px; color: var(--muted); font-size: 13px; }
+  #theme { position: fixed; right: 16px; top: 16px; border: 1px solid var(--line); background: var(--surface); color: var(--text);
+           border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+</style>
+</head>
+<body>
+<button id="theme" type="button" aria-label="表示テーマの切り替え">テーマ切替</button>
+<main>
+  <header>
+    <h1><span>Kev</span> テトリス強化学習</h1>
+    <p class="lead">ローカルで動く決定モデル Kev にテトリスをプレイさせ、強化学習で上達させる。その過程を X でライブ配信している。このページは、学習計画・報酬設計・成績・実行環境・今後の計画の記録だ。</p>
+    <p class="meta">最終更新: 2026-09-26 ・ 現在: 報酬 v2 で第10世代を学習中</p>
+    <nav>
+      <a href="#how">仕組み</a><a href="#env">モデルと実行環境</a><a href="#results">成績の推移</a>
+      <a href="#reward">報酬の変遷</a><a href="#history">学習計画の変遷</a><a href="#future">今後の計画</a>
+    </nav>
+  </header>
+
+  <section>
+    <div class="grid" style="margin-top:28px">
+      <div class="card kpi"><div class="v">20,160</div><div class="l">最高の平均得点(第6世代・v1)</div></div>
+      <div class="card kpi"><div class="v">× 46</div><div class="l">学習前(第0世代)からの平均得点の伸び</div></div>
+      <div class="card kpi"><div class="v">1.6 回</div><div class="l">1ゲームあたりのテトリス(第9世代・v2、分岐元は 0.2)</div></div>
+      <div class="card kpi"><div class="v">10 世代</div><div class="l">完了した世代数(第0〜9世代)</div></div>
+    </div>
+  </section>
+
+  <section id="how">
+    <h2>仕組み</h2>
+    <h3>Kev への問いかけ</h3>
+    <p>Kev は文章を生成しない決定モデルで、状態と質問を受け取ると、選択肢ごとの確率を1回の計算で返す。テトリスでは1手ごとに、次のように問いかける。</p>
+    <div class="card">
+      <p><b>状態</b>: 盤面のテキスト表現、現在のミノ、次のミノ(1個)、列の高さ、穴の数</p>
+      <p><b>質問</b>: 置き場所の候補(回転と列の組み合わせ、30〜40通り)から1つを選ぶ。各候補には、置いた結果の「消えるライン数・穴・最高の高さ・凸凹・最も深い井戸」を説明として付ける</p>
+      <p><b>方針</b>: Kev に見せるのは現在と次のミノだけ。それより先のミノや、先読みの結果は見せない</p>
+    </div>
+    <h3>1世代の流れ</h3>
+    <div class="steps">
+      <div class="step"><b><span class="n">1</span>練習試合</b>少しランダムに手を選んで16ゲーム遊び、プレイの記録を集める(1ゲーム最大200手)</div>
+      <div class="step"><b><span class="n">2</span>学習</b>記録から予想より良かった手を選び、その手を選ぶように Kev の重み(LoRA)を調整する</div>
+      <div class="step"><b><span class="n">3</span>実力テスト</b>ランダムなしで5ゲーム遊ぶ(毎回同じブロック順、最大500手)。平均得点をその世代の成績にする</div>
+    </div>
+    <p class="meta">「予想より良かった手」は、各手のあとに得た報酬の割引合計を、盤面の特徴から予想した値と比べて決める(アドバンテージ)。その上位35%を学習に使う。</p>
+  </section>
+
+  <section id="env">
+    <h2>モデルと実行環境</h2>
+    <div class="tablewrap"><table>
+      <tr><th>項目</th><th>内容</th></tr>
+      <tr><td>モデル</td><td>Kev-4B(<code>jaredpalmer/kev-4b</code>)。ベースは Qwen3.5-4B-Base、LoRA とポインタヘッドで選択肢の確率を出す</td></tr>
+      <tr><td>GPU</td><td>NVIDIA GeForce RTX 5060 Ti(VRAM 16GB)</td></tr>
+      <tr><td>OS</td><td>Windows 11(Kev は Windows ネイティブの Python 3.12 環境)</td></tr>
+      <tr><td>ソフトウェア</td><td>PyTorch 2.8.0 + CUDA 12.8、bfloat16。CUDA グラフは無効(16GB での安定性を優先)</td></tr>
+      <tr><td>速さ</td><td>推論 約0.36秒/手(中央値)、学習 約2.2秒/手、1世代 30〜55分</td></tr>
+      <tr><td>VRAM</td><td>推論 約10GB、学習中 約13GB</td></tr>
+      <tr><td>配信</td><td>ブラウザの配信画面を OBS で取り込み、X に RTMPS で送信</td></tr>
+      <tr><td>ライセンス</td><td>Kev と Qwen3.5 は Apache-2.0</td></tr>
+    </table></div>
+    <h3>モデルの変遷</h3>
+    <ul class="timeline">
+      <li><b>Kev-0.8B で開始</b>学習前の 0.8B は、32手でゲームオーバー・0ライン(ほぼランダム)</li>
+      <li><b>Kev-4B に変更</b>学習前の時点で平均4ライン・平均46手と、0.8B より明らかに強かった</li>
+      <li class="todo"><b>高速化の構想(未着手)</b>Docker+高速化ライブラリ、Kev-0.8B+CUDA グラフ(4B から蒸留)。詳細は「今後の計画」へ</li>
+    </ul>
+  </section>
+
+  <section id="results">
+    <h2>成績の推移</h2>
+    <p>実力テスト(5ゲーム・最大500手・同じブロック順)の平均得点。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統だ。</p>
+    <div class="card">
+      <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span></div>
+      <svg class="chart" id="scoreChart" role="img" aria-label="世代ごとの平均得点"></svg>
+    </div>
+    <div class="card">
+      <div class="legend"><span>1ゲームあたりのテトリス回数</span></div>
+      <svg class="chart" id="tetrisChart" role="img" aria-label="世代ごとのテトリス回数" style="height:200px"></svg>
+    </div>
+    <div class="tablewrap"><table id="resultTable">
+      <tr><th>世代</th><th>報酬</th><th>親</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
+    </table></div>
+    <p class="meta">1ラインあたり得点は、1列消しだけなら100、すべてテトリスなら200。第8世代までのテトリス回数と1ラインあたり得点は、保存済みのテスト録画を再生して数え直した値だ。</p>
+    <h3>わかったこと</h3>
+    <ul>
+      <li>v1 で、生き残る力は大きく伸びた。第5・6世代では、5ゲーム中3〜4ゲームがテストの上限(500手)まで生き残った</li>
+      <li>一方で、1ラインあたり得点は第8世代まで 104〜118 のままで、ほぼ1列消ししかしていなかった</li>
+      <li>v2 の最初の世代(第9世代)では、テトリスが1ゲームあたり1.6回に増え、1ラインあたり得点も最高の119.9になった。一方で、500手まで生き残ったゲームは0になった。今の腕前は、生存と高得点が両立しなくなる水準には遠く及ばない。これは代償ではなく学習の不足で、両方を満たすプレイを目指す</li>
+      <li>世代間の成績は上下に揺れる。成績が下がった世代もそのまま次の学習に使う設計のためだ</li>
+    </ul>
+  </section>
+
+  <section id="reward">
+    <h2>報酬の変遷</h2>
+    <p>報酬は、練習試合の各手を評価するための点数で、実力テストの得点とは別物だ。</p>
+    <div class="tablewrap"><table>
+      <tr><th>項目</th><th><span class="tag v1">v1</span> 第1〜8世代</th><th><span class="tag v2">v2</span> 第9世代〜</th><th>v3 案(次の見直し)</th></tr>
+      <tr><td>1列 / 2列 / 3列消し</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td></tr>
+      <tr><td>4列消し(テトリス)</td><td class="num">+8</td><td class="num hl">+16</td><td class="num">+16</td></tr>
+      <tr><td>1手生き延びる</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td></tr>
+      <tr><td>完全に塞がった穴が増える</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−1.0</td></tr>
+      <tr><td>オーバーハング(上にブロック、横は開いた空白)が増える</td><td class="num">−0.4(穴と同じ)</td><td class="num">−0.4(穴と同じ)</td><td class="num hl">−0.5</td></tr>
+      <tr><td>穴・オーバーハングの解消</td><td class="num">0</td><td class="num">0</td><td class="num hl">+0.8 / マス</td></tr>
+      <tr><td>最高の高さの増加</td><td class="num">−0.05</td><td class="num hl">なし</td><td class="num">なし</td></tr>
+      <tr><td>ゲームオーバー</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td></tr>
+      <tr><td>割引率</td><td class="num">0.9</td><td class="num hl">0.97</td><td class="num">0.97</td></tr>
+      <tr><td>Kev への指示</td><td>ラインを消し、穴を作らず、低く平らに保つ</td><td>1列を井戸として空け、I ミノでテトリスを狙う</td><td>v2 と同じ</td></tr>
+      <tr><td>学習する手の選び方</td><td>1手ごとのアドバンテージの上位35%</td><td>同じ(v2 の手だけを使う)</td><td class="hl">直前10手のウィンドウで評価</td></tr>
+    </table></div>
+    <h3>見直しの理由</h3>
+    <ul>
+      <li><b>v1 → v2</b>: テトリスの準備では必然的に高く積むため、高さの減点を外した。テトリスの価値を倍にし、何手も先で報われる手を評価できるよう割引率を上げた。生き残る力を引き継ぐため、ゼロからではなく第6世代から分岐した</li>
+      <li><b>v2 → v3 案</b>: 上にブロックが被った空白は、完全に塞がっていなくても避けたい。一方で、滑り込みで埋めたときや、上のラインが消えて穴でなくなったときには加点したい。解消の加点を発生の減点より小さくして、「穴を作ってから埋める」ことで点を稼げないようにする</li>
+    </ul>
+  </section>
+
+  <section id="history">
+    <h2>学習計画の変遷</h2>
+    <ul class="timeline">
+      <li><b>テトリス本体と Kev 向けインターフェースを作成</b>置き方は「回転して真下に落とす」。候補ごとに結果の説明を付けて、Choice 質問として Kev に渡す</li>
+      <li><b>強化学習ループ(v1)</b>練習試合 → 良かった手の学習 → 実力テスト、の3段階。直前2世代の良い手も一緒に復習する</li>
+      <li><b>評価を平均ライン数から平均得点に変更</b>テストの上限は、世代の比較を続けるため500手のまま</li>
+      <li><b>止めるまで世代を重ねる運用に変更</b>配信画面では、練習試合とテストをライブで流し、学習中は過去の世代の録画を再生する</li>
+      <li><b>報酬 v2 に変更し、第6世代から分岐</b>生き残りは達成したが、テトリスを狙わないことがわかったため</li>
+      <li class="todo"><b>v2 を数世代評価(進行中)</b>1ラインあたり得点、テトリス回数、生き残りの3つを見る</li>
+    </ul>
+  </section>
+
+  <section id="future">
+    <h2>今後の計画</h2>
+    <h3>学習方針の見直し(v3)</h3>
+    <p>v2 の効果を数世代見てから、次をまとめて入れる。v2 の検証が濁らないよう、それまでは入れない。</p>
+    <div class="grid">
+      <div class="card"><b>10手ウィンドウで評価</b><p>各手で終わる直前10手をウィンドウとし、1手ずつずらす。ウィンドウ内の報酬と盤面の良さの変化で評価し、各手はそれを含むウィンドウの平均で選ぶ。テトリスの準備のような、10手以上の連携を学べるようにする。</p></div>
+      <div class="card"><b>滑り込み・回転入れ</b><p>左右移動・回転・1段落としでたどり着ける場所をすべて候補にする。オーバーハングの下へ滑り込ませる手も打てるようにする。</p></div>
+      <div class="card"><b>穴の報酬の細分化</b><p>塞がった穴とオーバーハングを分けて減点し、解消したら加点する。候補の説明でも2つを分けて表示する。</p></div>
+    </div>
+    <p class="meta">保留中の案: 練習試合では穴を開けない候補を優先する / くじ引きの温度を下げる / 1世代で学習する手の数に上限を設ける</p>
+
+    <h3>高速化</h3>
+    <div class="tablewrap"><table>
+      <tr><th>段階</th><th>内容</th><th>状態</th></tr>
+      <tr><td>1</td><td>練習試合とテストの複数ゲームを同時に進め、Kev サーバーのバッチ処理を活かす</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>2</td><td>Docker(WSL2 の Linux コンテナ)で GPU を使えることを確認する</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>3</td><td>コンテナで高速化ライブラリ(flash-linear-attention、causal-conv1d)の効果を 4B で測る</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>4</td><td>Kev-0.8B + CUDA グラフの速さと安定性を測る</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>5</td><td>4B の最良世代から 0.8B に蒸留する(教師あり学習)</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>6</td><td>0.8B で強化学習を続ける(配信用と学習用の Kev を同時に動かせる)</td><td><span class="status next">未着手</span></td></tr>
+    </table></div>
+    <p>0.8B で成績が 4B に届かない場合は、<b>Kev-4B + 高速化ライブラリ(CUDA グラフなし)</b>に戻す。モデルの大きさより学習計画の方が効くと見て、まず 0.8B を試す。</p>
+
+    <h3>進め方</h3>
+    <ul class="timeline">
+      <li><b>v1 で生き残りを学習(第1〜8世代)</b><span class="status done">完了</span></li>
+      <li><b>v2 でテトリスを狙わせる(第9世代〜)</b><span class="status now">進行中</span></li>
+      <li class="todo"><b>v2 の結果を評価</b><span class="status next">v2 の数世代後</span></li>
+      <li class="todo"><b>v3 に進む</b><span class="status next">評価の結果次第</span></li>
+      <li class="todo"><b>高速化</b><span class="status next">構想済み。v3 と並行して進めてもよい</span></li>
+    </ul>
+  </section>
+
+  <footer>Kev は jaredpalmer/kev(Apache-2.0)、ベースモデルは Qwen3.5(Apache-2.0)。このページの数値は、実力テストの記録から作成した。</footer>
+</main>
+<script>
+// test results per generation (runs/generations.json + recounted from the test recordings)
+const GENS = [
+  { gen: 0, reward: "-",  parent: null, score: 440,   lines: 4,     pieces: 46.4,  survived: 0, spl: 110.0, tetris: 0.0, min: null },
+  { gen: 1, reward: "v1", parent: 0, score: 1520,  lines: 13.6,  pieces: 73.6,  survived: 0, spl: 111.8, tetris: 0.0, min: 11.7 },
+  { gen: 2, reward: "v1", parent: 1, score: 10080, lines: 88.4,  pieces: 263,   survived: 0, spl: 114.0, tetris: 0.4, min: 26.5 },
+  { gen: 3, reward: "v1", parent: 2, score: 1900,  lines: 18.2,  pieces: 86.8,  survived: 0, spl: 104.4, tetris: 0.0, min: 29.0 },
+  { gen: 4, reward: "v1", parent: 3, score: 5340,  lines: 46.6,  pieces: 159.2, survived: 0, spl: 114.6, tetris: 0.0, min: 34.6 },
+  { gen: 5, reward: "v1", parent: 4, score: 17620, lines: 153.4, pieces: 419.2, survived: 3, spl: 114.9, tetris: 0.6, min: 50.1 },
+  { gen: 6, reward: "v1", parent: 5, score: 20160, lines: 171.2, pieces: 457.6, survived: 4, spl: 117.8, tetris: 0.2, min: 53.7 },
+  { gen: 7, reward: "v1", parent: 6, score: 15000, lines: 134.8, pieces: 379.2, survived: 1, spl: 111.3, tetris: 0.0, min: 53.4 },
+  { gen: 8, reward: "v1", parent: 7, score: 15360, lines: 135.4, pieces: 378.2, survived: 1, spl: 113.4, tetris: 0.4, min: 56.8 },
+  { gen: 9, reward: "v2", parent: 6, score: 14480, lines: 120.8, pieces: 345.2, survived: 0, spl: 119.9, tetris: 1.6, min: 27.4 },
+];
+const fmt = n => n == null ? "-" : Number(n).toLocaleString("ja-JP");
+const colorOf = g => g.reward === "v2" ? "var(--s2)" : "var(--s1)";
+
+const table = document.getElementById("resultTable");
+for (const g of GENS) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td>第${g.gen}世代</td><td>${g.reward === "-" ? "学習前" : `<span class="tag ${g.reward}">${g.reward}</span>`}</td>
+    <td>${g.parent == null ? "-" : "第" + g.parent + "世代"}</td><td class="num">${fmt(g.score)}</td><td class="num">${g.lines}</td>
+    <td class="num">${g.pieces}</td><td class="num">${g.survived}/5</td><td class="num">${g.spl.toFixed(1)}</td>
+    <td class="num">${g.tetris.toFixed(1)}</td><td class="num">${g.min == null ? "-" : g.min + "分"}</td>`;
+  table.appendChild(tr);
+}
+
+function bars(svg, key, niceSteps, label) {
+  const W = svg.clientWidth, H = svg.clientHeight, m = { l: 56, r: 12, t: 22, b: 26 };
+  const top = Math.max(...GENS.map(g => g[key])) || 1;
+  const step = niceSteps.find(v => top / v <= 4) || niceSteps[niceSteps.length - 1];
+  const yMax = Math.ceil(top / step) * step;
+  const bw = (W - m.l - m.r) / GENS.length;
+  const y = v => H - m.b - (H - m.t - m.b) * v / yMax;
+  let s = "";
+  for (let v = 0; v <= yMax; v += step)
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  GENS.forEach((g, i) => {
+    const x = m.l + i * bw + bw * 0.18, w = bw * 0.64, h = Math.max(0, y(0) - y(g[key]));
+    s += `<rect x="${x}" y="${y(g[key])}" width="${w}" height="${h}" rx="4" fill="${colorOf(g)}"><title>第${g.gen}世代: ${label} ${fmt(g[key])}</title></rect>`;
+    s += `<text x="${x + w / 2}" y="${y(g[key]) - 6}" text-anchor="middle">${fmt(g[key])}</text>`;
+    s += `<text x="${x + w / 2}" y="${H - 8}" text-anchor="middle">${g.gen}</text>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = s;
+}
+function draw() {
+  bars(document.getElementById("scoreChart"), "score", [1000, 2000, 5000, 10000, 20000], "平均得点");
+  bars(document.getElementById("tetrisChart"), "tetris", [0.5, 1, 2, 5], "テトリス/ゲーム");
+}
+addEventListener("resize", draw); draw();
+
+const root = document.documentElement, btn = document.getElementById("theme");
+try { const t = localStorage.getItem("theme"); if (t) root.dataset.theme = t; } catch (e) {}
+btn.onclick = () => {
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("theme", root.dataset.theme); } catch (e) {}
+};
+</script>
+</body>
+</html>

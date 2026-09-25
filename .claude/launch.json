@@ -1,0 +1,31 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stream",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "kev_tetris.stream"
+      ],
+      "port": 8765
+    },
+    {
+      "name": "stream-demo",
+      "runtimeExecutable": "python",
+      "runtimeArgs": [
+        "-m",
+        "kev_tetris.stream",
+        "--demo",
+        "--pieces_per_gen",
+        "40",
+        "--move_delay",
+        "0.2",
+        "--train_args=--demo --generations 3 --episodes 2 --max_pieces 40 --eval_games 1 --eval_max_pieces 60 --demo_train_seconds 20",
+        "--port",
+        "8766"
+      ],
+      "port": 8766
+    }
+  ]
+}
