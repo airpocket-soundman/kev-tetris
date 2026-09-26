@@ -147,13 +147,13 @@
       </dl>
     </div>
     <div class="panel" id="chartpanel">
-      <div class="label">世代ごとのテスト成績(1ゲーム最大1000手・第36世代まで500手)</div>
+      <div class="label">世代ごとのテスト成績(1ゲーム最大500手・第37〜38世代は1000手)</div>
       <div id="legend"><span><i style="background:var(--s-mean)"></i>平均</span><span><i style="background:var(--s-best)"></i>最高</span></div>
       <div class="csub">1ミノあたりの得点</div>
       <div class="chart" id="chartScore"></div>
       <div class="csub">1ミノあたりのライン数(最大0.4)</div>
       <div class="chart" id="chartLines"></div>
-      <div class="csub">生き残った手数(上限1000・第36世代まで500)</div>
+      <div class="csub">生き残った手数(上限500・第37〜38世代は1000)</div>
       <div class="chart" id="chartPieces"></div>
     </div>
   </div>
@@ -443,7 +443,7 @@ function connect() {
       if (same) { overlay(); return; }
       if (m.mode === "practice" || m.mode === "test") {
         overlay(m.mode === "practice" ? "練習試合スタート" : "実力テスト", `第${m.gen}世代`,
-                m.mode === "practice" ? `ここでの良い手を覚えて 第${m.training_gen}世代 に進化します` : `${m.games}ゲーム(各最大${m.max_pieces || 1000}手)の1ミノあたり得点で成績を測ります`);
+                m.mode === "practice" ? `ここでの良い手を覚えて 第${m.training_gen}世代 に進化します` : `${m.games}ゲーム(各最大${m.max_pieces || 500}手)の1ミノあたり得点で成績を測ります`);
         await sleep(2000); overlay(); return;
       }
       overlay("登場!", `第${m.gen}世代`, m.gen === 0 ? "まだ何も練習していない Kev" : `テスト平均 ${m.eval?.mean_score != null ? fmt(Math.round(m.eval.mean_score)) : "?"} 点`);
