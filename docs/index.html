@@ -82,7 +82,7 @@
     <p class="meta">最終更新: <span id="updated">-</span> ・ <span id="current">-</span></p>
     <nav>
       <a href="#how">仕組み</a><a href="#env">モデルと実行環境</a><a href="#results">成績の推移</a>
-      <a href="#reward">報酬の変遷</a><a href="#history">学習計画の変遷</a><a href="#future">今後の計画</a>
+      <a href="#reward">報酬の変遷</a><a href="#history">学習計画の変遷</a><a href="#future">今後の計画</a><a href="#speedup">高速化</a>
     </nav>
   </header>
 
@@ -212,17 +212,30 @@
     </div>
     <p class="meta">保留中の案: 練習試合では穴を開けない候補を優先する / くじ引きの温度を下げる / 1世代で学習する手の数に上限を設ける</p>
 
-    <h3>高速化</h3>
+    <h3 id="speedup">高速化(進行中)</h3>
+    <p>1世代に30〜55分かかっているのを縮める。今回は、<b>Kev-4B とこれまでの学習結果(第10世代まで)をそのまま引き継ぎ</b>、実行環境だけを入れ替える。詳しい構想は <a href="speedup-plan.html">高速化構想</a> にある。</p>
+    <div class="card">
+      <p><b>遅い原因</b>: (1) Qwen3.5 の DeltaNet と畳み込みに使う高速化ライブラリ(flash-linear-attention、causal-conv1d)が Windows では入らず、遅い標準実装で動いている。(2) 16GB での安定性を優先して、CUDA グラフを無効にしている。(3) 1手ずつ順番に問い合わせていて、まとめ処理を使っていない。</p>
+      <p><b>今回の方針</b>: 学習ループと Kev を Docker(WSL2 の Linux コンテナ、GPU あり)に移し、高速化ライブラリを入れる。CUDA グラフは無効のまま(4B と 16GB の組み合わせでは不安定になるおそれがあるため)。配信サーバーは Windows に残し、共有フォルダでつなぐ。</p>
+    </div>
     <div class="tablewrap"><table>
       <tr><th>段階</th><th>内容</th><th>状態</th></tr>
-      <tr><td>1</td><td>練習試合とテストの複数ゲームを同時に進め、Kev サーバーのバッチ処理を活かす</td><td><span class="status next">未着手</span></td></tr>
-      <tr><td>2</td><td>Docker(WSL2 の Linux コンテナ)で GPU を使えることを確認する</td><td><span class="status next">未着手</span></td></tr>
-      <tr><td>3</td><td>コンテナで高速化ライブラリ(flash-linear-attention、causal-conv1d)の効果を 4B で測る</td><td><span class="status next">未着手</span></td></tr>
-      <tr><td>4</td><td>Kev-0.8B + CUDA グラフの速さと安定性を測る</td><td><span class="status next">未着手</span></td></tr>
-      <tr><td>5</td><td>4B の最良世代から 0.8B に蒸留する(教師あり学習)</td><td><span class="status next">未着手</span></td></tr>
-      <tr><td>6</td><td>0.8B で強化学習を続ける(配信用と学習用の Kev を同時に動かせる)</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>1</td><td>コンテナから GPU を使えることを確認する(RTX 5060 Ti、16GB、ドライバ 591.86)</td><td><span class="status done">完了</span></td></tr>
+      <tr><td>2</td><td>Kev(デプロイ済みと同じコミット)、torch 2.8 + CUDA 12.8、高速化ライブラリを入れたイメージを作る(causal-conv1d は RTX 50 系向けにビルドする)</td><td><span class="status now">作業中</span></td></tr>
+      <tr><td>3</td><td>コンテナで Kev-4B の推論と学習の速さを測り、Windows と比べる</td><td><span class="status next">これから</span></td></tr>
+      <tr><td>4</td><td>第10世代から、コンテナで学習を再開する</td><td><span class="status next">これから</span></td></tr>
+      <tr><td>5</td><td>練習試合とテストの複数ゲームを同時に進める</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>6</td><td>Kev-0.8B + CUDA グラフを試し、4B から蒸留する。成績が 4B に届かなければ 4B を使い続ける</td><td><span class="status next">未着手</span></td></tr>
     </table></div>
-    <p>0.8B で成績が 4B に届かない場合は、<b>Kev-4B + 高速化ライブラリ(CUDA グラフなし)</b>に戻す。モデルの大きさより学習計画の方が効くと見て、まず 0.8B を試す。</p>
+    <h3>高速化の効果</h3>
+    <div class="tablewrap"><table id="speedTable">
+      <tr><th>項目</th><th>Windows(高速化前)</th><th>Docker + 高速化ライブラリ</th><th>変化</th></tr>
+      <tr><td>推論(1手、中央値)</td><td class="num">約 360 ms</td><td class="num">測定中</td><td class="num">-</td></tr>
+      <tr><td>推論(1手、90パーセンタイル)</td><td class="num">約 610 ms</td><td class="num">測定中</td><td class="num">-</td></tr>
+      <tr><td>学習(1手)</td><td class="num">約 2.2 秒</td><td class="num">測定中</td><td class="num">-</td></tr>
+      <tr><td>1世代の所要時間</td><td class="num">30〜55 分</td><td class="num">測定中</td><td class="num">-</td></tr>
+    </table></div>
+    <p class="meta">高速化前の値は、第6〜10世代のテスト記録と学習ログから求めた。測定が終わり次第、この表を更新する。</p>
 
     <h3>進め方</h3>
     <ul class="timeline">
@@ -230,7 +243,7 @@
       <li><b>v2 でテトリスを狙わせる(第9世代〜)</b><span class="status now">進行中</span></li>
       <li class="todo"><b>v2 の結果を評価</b><span class="status next">v2 の数世代後</span></li>
       <li class="todo"><b>v3 に進む</b><span class="status next">評価の結果次第</span></li>
-      <li class="todo"><b>高速化</b><span class="status next">構想済み。v3 と並行して進めてもよい</span></li>
+      <li class="todo"><b>高速化(Docker + 高速化ライブラリ、4B のまま)</b><span class="status now">作業中</span></li>
     </ul>
   </section>
 

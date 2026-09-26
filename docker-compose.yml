@@ -1,0 +1,21 @@
+# The RL loop in a Linux container with the fast kernels (docs/speedup-plan.md).
+#   docker compose build            # once (causal-conv1d compiles for sm_120: takes a while)
+#   docker compose up -d kev        # the stream server's "学習開始" does this with --train_launcher docker
+# runs/ is shared with the Windows side, where the stream server keeps running.
+services:
+  kev:
+    build:
+      context: ./docker
+    image: kev-tetris-kev
+    gpus: all
+    shm_size: "8gb"
+    working_dir: /work
+    volumes:
+      - .:/work
+      - ${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      KEV_HOME: /opt/kev
+      KEV_PYTHON: /opt/venv/bin/python
+      KEV_CUDA_GRAPHS: "0"        # 4B on 16 GB: graphs stay off (docs/speedup-plan.md, section 7)
+      HF_HUB_DISABLE_SYMLINKS: "1"
+    command: ["python", "-m", "kev_tetris.rl", "--generations", "0"]

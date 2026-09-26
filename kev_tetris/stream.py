@@ -20,7 +20,7 @@ current one plays (two Kev-0.8B fit in 16 GB), so the switch is instant.
 """
 from __future__ import annotations
 
-import argparse, json, queue, random, shlex, subprocess, sys, threading, time, urllib.request
+import argparse, json, queue, random, shlex, socket, subprocess, sys, threading, time, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -29,6 +29,19 @@ from .policy import ROOT, Decision, HeuristicPolicy, KevPolicy, KevServer, Rando
 from .tetris import Game, PIECES
 
 STATIC = Path(__file__).resolve().parent / "static"
+MAINTENANCE = ROOT / "runs" / "maintenance.json"   # {"on": true, "title": ..., "message": ...}: the big notice on the stream
+MAINTENANCE_DEFAULT = {"title": "高速化改良中",
+                       "message": "Docker と高速化ライブラリを導入しています。これまでの学習の成果を引き継いで再開します"}
+
+
+def maintenance() -> dict:
+    try: return {**MAINTENANCE_DEFAULT, **json.loads(MAINTENANCE.read_text(encoding="utf-8"))}
+    except (OSError, ValueError): return {**MAINTENANCE_DEFAULT, "on": False}
+
+
+def set_maintenance(on: bool):
+    MAINTENANCE.parent.mkdir(parents=True, exist_ok=True)
+    MAINTENANCE.write_text(json.dumps({**maintenance(), "on": on}, ensure_ascii=False), encoding="utf-8")
 
 
 class Hub:
@@ -46,7 +59,7 @@ class Hub:
     def subscribe(self) -> queue.Queue:
         q = queue.Queue()
         with self.lock:
-            for kind in ("gens", "gen", "move", "train"):
+            for kind in ("gens", "gen", "move", "train", "maintenance"):
                 if kind in self.last: q.put(self.last[kind])
             self.clients.append(q)
         return q
@@ -77,7 +90,7 @@ def make_handler(hub: Hub, trainer: "Trainer"):
                     hub.unsubscribe(q)
                 return
             if self.path.startswith("/api/train/status"):
-                self._json(trainer.status()); return
+                self._json({**trainer.status(), "maintenance": maintenance()}); return
             name = {"/": "index.html", "/index.html": "index.html", "/control": "control.html"}.get(self.path.split("?")[0])
             if not name: self.send_error(404); return
             body = (STATIC / name).read_bytes()
@@ -89,6 +102,8 @@ def make_handler(hub: Hub, trainer: "Trainer"):
             # a custom header forces a CORS preflight, which this server never answers: other web pages cannot press the buttons
             if self.headers.get("x-kev-control") != "1": self.send_error(403); return
             action = self.path.rsplit("/", 1)[-1]
+            if self.path.startswith("/api/maintenance/") and action in ("on", "off"):
+                set_maintenance(action == "on"); self._json(maintenance()); return
             fn = {"start": trainer.start, "pause": trainer.pause, "resume": trainer.resume, "stop": trainer.stop}.get(action)
             if not self.path.startswith("/api/train/") or not fn: self.send_error(404); return
             try: fn(); self._json(trainer.status())
@@ -108,8 +123,8 @@ class Trainer:
     runs (then it suspends kev.train's process tree). A loop started from a terminal is seen and controlled too: its pid
     is in runs/rl_status.json."""
 
-    def __init__(self, args: list[str]):
-        self.args, self.child = args, None
+    def __init__(self, args: list[str], launcher: str = "local"):
+        self.args, self.child, self.launcher = args, None, launcher
         self.tracker = progress.Tracker()
         self.lock = threading.Lock()
 
@@ -120,7 +135,10 @@ class Trainer:
     def running(self) -> bool:
         if self.child and self.child.poll() is None: return True
         st = self._status_file()
-        return st.get("state") in ("running", "paused") and proc.alive(st.get("pid"))
+        if st.get("state") not in ("running", "paused"): return False
+        if st.get("host", socket.gethostname()) != socket.gethostname():   # in a container: trust the heartbeat
+            return time.time() - st.get("updated", 0) < 60
+        return proc.alive(st.get("pid"))
 
     def status(self) -> dict:
         st, run = self._status_file(), self.running()
@@ -136,6 +154,10 @@ class Trainer:
             if rl.get_command() == "pause": rl.set_command("run")
             return
         rl.set_command("run")
+        if self.launcher == "docker":   # docker-compose.yml runs the loop (with its own arguments) in the kev service
+            r = subprocess.run(["docker", "compose", "up", "-d", "kev"], cwd=ROOT, capture_output=True, text=True, timeout=300)
+            if r.returncode: raise RuntimeError(f"docker compose up failed: {r.stderr.strip()[:300]}")
+            return
         log = ROOT / "runs" / "rl.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         f = log.open("a", encoding="utf-8")
@@ -158,8 +180,11 @@ class Trainer:
 
 def watch_training(hub: Hub, trainer: Trainer, stop):
     """Forward the training status and its progress to the stream screen, and new test results to its chart."""
-    last, last_gens = None, None
+    last, last_gens, last_maint = None, None, None
     while not stop.is_set():
+        m = maintenance()
+        if m != last_maint:
+            hub.publish("maintenance", m); last_maint = m
         st = trainer.status()
         view = {k: st.get(k) for k in ("state", "phase", "gen", "detail", "progress", "active", "progress_view")}
         if view != last:
@@ -356,6 +381,8 @@ def run_show(hub, a, stop, trainer):
         return not a.demo and live.read() is not None
 
     while not stop.is_set():
+        if maintenance().get("on"):   # the GPU and Kev are being rebuilt: load nothing, the page shows the notice
+            time.sleep(2); continue
         if training_plays():
             follow_training(hub, a, stop, load_gens)
             continue
@@ -368,7 +395,7 @@ def run_show(hub, a, stop, trainer):
         shown = 0
         seat = None
         for i, entry in enumerate(gens_order):
-            if stop.is_set() or training_plays(): break
+            if stop.is_set() or training_plays() or maintenance().get("on"): break
             if seat is None or seat.entry is not entry:
                 seat = seat_for(entry, ports[i % 2], reuse)
                 if seat is None: continue
@@ -384,7 +411,7 @@ def run_show(hub, a, stop, trainer):
                 pre = Seat(nxt, ports[(i + 1) % 2], a.demo, reuse)
                 threading.Thread(target=pre.load, daemon=True).start()
             owns_gpu = seat.server is not None
-            yield_now = (lambda: (owns_gpu and a.source == "auto" and training()) or training_plays())
+            yield_now = (lambda: (owns_gpu and a.source == "auto" and training()) or training_plays() or maintenance().get("on"))
             result = play(hub, seat, gens, a, stop, nxt, yield_now)
             shown += 1
             if result["ended"] == "training":
@@ -422,6 +449,7 @@ def main(argv=None):
     ap.add_argument("--start", default="jaredpalmer/kev-4b", help="generation 0 when nothing is trained yet")
     ap.add_argument("--model_name", default="Kev-4B")
     ap.add_argument("--source", choices=["auto", "live", "replay"], default="auto", help="live play, recorded test games, or live unless training runs (see the module doc)")
+    ap.add_argument("--train_launcher", choices=["local", "docker"], default="local", help="where 学習開始 starts the loop: this Python, or the kev service of docker-compose.yml")
     ap.add_argument("--train_args", default="--generations 0", help="arguments for kev_tetris.rl when the control page starts training")
     ap.add_argument("--pieces_per_gen", type=int, default=150, help="a generation's turn ends after this many pieces (or game over)")
     ap.add_argument("--move_delay", type=float, default=0.18, help="seconds per move, so viewers can follow")
@@ -435,7 +463,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     hub, stop = Hub(), threading.Event()
-    trainer = Trainer(shlex.split(a.train_args))
+    trainer = Trainer(shlex.split(a.train_args), a.train_launcher)
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(hub, trainer))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     threading.Thread(target=watch_training, args=(hub, trainer, stop), daemon=True).start()

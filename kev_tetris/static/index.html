@@ -119,6 +119,15 @@
   .carrow { align-self: center; font-size: 22px; color: var(--muted); font-weight: 900; }
   .carrow.loop { font-size: 15px; line-height: 1.2; text-align: center; writing-mode: horizontal-tb; }
   #cycle.idle .cstep { opacity: .5; }
+  #maint { position: absolute; inset: 0; display: grid; place-items: center; background: #05070fcc; z-index: 50;
+           opacity: 0; transition: opacity .6s; pointer-events: none; }
+  #maint.show { opacity: 1; }
+  #maint .box { width: 1120px; padding: 64px 72px; border-radius: 32px; background: var(--panel); text-align: center;
+                border: 3px solid var(--accent); box-shadow: 0 0 80px #5ee7ff55; }
+  #maint .gear { font-size: 110px; line-height: 1; display: inline-block; animation: spin 4s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #maint h2 { font-size: 104px; font-weight: 900; margin: 18px 0 12px; letter-spacing: .06em; }
+  #maint p { font-size: 32px; color: var(--muted); font-weight: 700; margin: 0; line-height: 1.6; }
   #conn { position: absolute; right: 18px; bottom: 10px; font-size: 16px; color: var(--muted); }
 </style>
 </head>
@@ -185,6 +194,7 @@
     </div>
   </div>
   <div id="conn">接続中…</div>
+  <div id="maint"><div class="box"><div class="gear">⚙</div><h2 id="mtitle">高速化改良中</h2><p id="mmsg"></p></div></div>
 </div>
 
 <script>
@@ -422,6 +432,10 @@ function connect() {
       const queued = moves.filter(x => x.type === "move");
       if (queued.length > 4) moves.splice(moves.indexOf(queued[0]), 1);   // every move carries whole boards: dropping one is safe
       pump();
+    }
+    else if (m.type === "maintenance") {
+      $("mtitle").textContent = m.title; $("mmsg").textContent = m.message;
+      $("maint").classList.toggle("show", !!m.on);
     }
     else if (m.type === "train") {
       showProgress(m); showCycle(m);

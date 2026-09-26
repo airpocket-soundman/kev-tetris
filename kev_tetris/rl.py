@@ -16,7 +16,7 @@ starts kev.serve for collection and evaluation and stops it before training.
 """
 from __future__ import annotations
 
-import json, os, random, shutil, statistics, subprocess, sys, time
+import json, os, random, shutil, socket, statistics, subprocess, sys, time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -79,7 +79,8 @@ class Control:
         self.status.update(kw)
         if force or time.time() - self.last > 1.0:
             self.last = time.time()
-            try: _write_json(STATUS, {**self.status, "pid": os.getpid(), "updated": self.last})
+            # host: a loop in a container has a pid the Windows side cannot check, so readers fall back to `updated`
+            try: _write_json(STATUS, {**self.status, "pid": os.getpid(), "host": socket.gethostname(), "updated": self.last})
             except PermissionError: pass   # display only: never stop training over it
 
     def checkpoint(self, on_pause=None, on_resume=None):
@@ -193,8 +194,9 @@ def train_generation(data: Path, init_from: str, out: Path, a, ctl: Control) -> 
     if a.demo:   # stand-in: a process that just takes time, so pause / resume / stop can be tried without a GPU
         cmd, cwd = [sys.executable, "-c", f"import time\nfor i in range({a.demo_train_seconds}): print(i, flush=True); time.sleep(1)"], ROOT
     else:
-        # kev_train_win.py = `-m kev.train` with stand-ins for the Unix-only modules it imports (see that file)
-        cmd = [kevenv.kev_python(), str(Path(__file__).with_name("kev_train_win.py")), "--data", str(data), "--base", a.base,
+        # on Windows, kev_train_win.py = `-m kev.train` with stand-ins for the Unix-only modules it imports (see that file)
+        entry = [str(Path(__file__).with_name("kev_train_win.py"))] if sys.platform == "win32" else ["-m", "kev.train"]
+        cmd = [kevenv.kev_python(), *entry, "--data", str(data), "--base", a.base,
                "--init_from", kevenv.resolve_run(init_from), "--out", str(out), "--epochs", str(a.epochs), "--lr", str(a.lr),
                "--batch", "1", "--accum", str(a.accum), "--dtype", "bf16", "--weights_dtype", "bf16", "--checkpointing", "1",
                "--device", "cuda", "--max_state", str(a.max_state)]

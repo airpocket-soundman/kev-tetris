@@ -57,6 +57,10 @@
       <button id="resume">▶ 再開</button>
       <button id="stop">■ 停止</button>
     </div>
+    <div class="buttons" style="margin-top:14px">
+      <button id="maintOn" style="background:var(--accent)">配信に「高速化改良中」を表示</button>
+      <button id="maintOff" style="background:transparent;color:var(--text);border:2px solid var(--line)">表示を消す</button>
+    </div>
     <p id="msg"></p>
     <p class="note">一時停止は次の1手の区切り(学習中なら学習プロセスごと)で止まり、GPUメモリは確保したままです。
       停止すると途中の世代は捨てられ、次に「学習開始」を押すとその世代からやり直します。
@@ -94,6 +98,8 @@ function render(s) {
   $("resume").disabled = !s.active || s.command !== "pause";
   $("stop").disabled = !s.active || s.command === "stop";
   $("args").textContent = (s.args || []).join(" ");
+  const mon = !!(s.maintenance && s.maintenance.on);
+  $("maintOn").disabled = mon; $("maintOff").disabled = !mon;
   const gens = s.generations || [];
   $("gens").innerHTML = gens.length ? gens.map(g => {
     const e = g.eval || {}, t = g.train || {};
@@ -111,6 +117,11 @@ async function act(action) {
   if (s.message) $("msg").textContent = s.message;
   render(s);
 }
+async function maint(on) {
+  await fetch(`/api/maintenance/${on ? "on" : "off"}`, { method: "POST", headers: { "x-kev-control": "1" } });
+  refresh();
+}
+$("maintOn").onclick = () => maint(true); $("maintOff").onclick = () => maint(false);
 for (const a of ["start", "pause", "resume", "stop"]) $(a).onclick = () => {
   if (a === "stop" && !confirm("学習を停止します。途中の世代は捨てられます。よろしいですか?")) return;
   act(a);
