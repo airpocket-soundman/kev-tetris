@@ -143,9 +143,16 @@ def _best_score(g: dict):
     return max((r["score"] for r in games), default=None)
 
 
+def _best_pieces(g: dict):
+    """The longest test game (pieces placed), from the recordings; the test stops at its max_pieces (500)."""
+    games = replays.load(g["gen"]) if g.get("eval") else []
+    return max((r["pieces"] for r in games), default=None)
+
+
 def gens_event(gens: list[dict] | None = None) -> dict:
     """The "gens" event: the test results of every generation, for the score chart (generations are compared by score)."""
     gens = generations.load() if gens is None else gens
     return {"gens": [{"gen": g["gen"], "mean_lines": (g.get("eval") or {}).get("mean_lines"),
                       "best_lines": (g.get("eval") or {}).get("best_lines"),
-                      "mean_score": (g.get("eval") or {}).get("mean_score"), "best_score": _best_score(g)} for g in gens]}
+                      "mean_score": (g.get("eval") or {}).get("mean_score"), "best_score": _best_score(g),
+                      "mean_pieces": (g.get("eval") or {}).get("mean_pieces"), "best_pieces": _best_pieces(g)} for g in gens]}

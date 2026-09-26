@@ -144,6 +144,8 @@
       <div class="chart" id="chartScore"></div>
       <div class="csub">消したライン数</div>
       <div class="chart" id="chartLines"></div>
+      <div class="csub">生き残った手数(上限500)</div>
+      <div class="chart" id="chartPieces"></div>
     </div>
   </div>
 
@@ -254,7 +256,8 @@ function showGen(g) {
 }
 function drawChart() {
   plot($("chartScore"), "mean_score", "best_score", [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000], 400, false);
-  plot($("chartLines"), "mean_lines", "best_lines", [1, 2, 5, 10, 20, 25, 50, 100, 200, 500], 4, true);
+  plot($("chartLines"), "mean_lines", "best_lines", [1, 2, 5, 10, 20, 25, 50, 100, 200, 500], 4, false);
+  plot($("chartPieces"), "mean_pieces", "best_pieces", [50, 100, 250], 100, true);
 }
 function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels) {
   const W = el.clientWidth, H = el.clientHeight;

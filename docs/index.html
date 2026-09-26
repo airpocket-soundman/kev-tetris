@@ -79,7 +79,7 @@
   <header>
     <h1><span>Kev</span> テトリス強化学習</h1>
     <p class="lead">ローカルで動く決定モデル Kev にテトリスをプレイさせ、強化学習で上達させる。その過程を X でライブ配信している。このページは、学習計画・報酬設計・成績・実行環境・今後の計画の記録だ。</p>
-    <p class="meta">最終更新: 2026-09-26 ・ 現在: 報酬 v2 で第10世代を学習中</p>
+    <p class="meta">最終更新: <span id="updated">-</span> ・ <span id="current">-</span></p>
     <nav>
       <a href="#how">仕組み</a><a href="#env">モデルと実行環境</a><a href="#results">成績の推移</a>
       <a href="#reward">報酬の変遷</a><a href="#history">学習計画の変遷</a><a href="#future">今後の計画</a>
@@ -88,10 +88,10 @@
 
   <section>
     <div class="grid" style="margin-top:28px">
-      <div class="card kpi"><div class="v">20,160</div><div class="l">最高の平均得点(第6世代・v1)</div></div>
-      <div class="card kpi"><div class="v">× 46</div><div class="l">学習前(第0世代)からの平均得点の伸び</div></div>
-      <div class="card kpi"><div class="v">1.6 回</div><div class="l">1ゲームあたりのテトリス(第9世代・v2、分岐元は 0.2)</div></div>
-      <div class="card kpi"><div class="v">10 世代</div><div class="l">完了した世代数(第0〜9世代)</div></div>
+      <div class="card kpi"><div class="v" id="k1">-</div><div class="l" id="k1l">最高の平均得点</div></div>
+      <div class="card kpi"><div class="v" id="k2">-</div><div class="l">学習前(第0世代)からの、最高の平均得点の伸び</div></div>
+      <div class="card kpi"><div class="v" id="k3">-</div><div class="l" id="k3l">1ゲームあたりのテトリス(最多)</div></div>
+      <div class="card kpi"><div class="v" id="k4">-</div><div class="l" id="k4l">完了した世代数</div></div>
     </div>
   </section>
 
@@ -145,11 +145,18 @@
       <div class="legend"><span>1ゲームあたりのテトリス回数</span></div>
       <svg class="chart" id="tetrisChart" role="img" aria-label="世代ごとのテトリス回数" style="height:200px"></svg>
     </div>
+    <div class="card">
+      <div class="legend"><span>生き残った平均手数(テストの上限は500手)</span></div>
+      <svg class="chart" id="piecesChart" role="img" aria-label="世代ごとの平均手数" style="height:200px"></svg>
+    </div>
     <div class="tablewrap"><table id="resultTable">
-      <tr><th>世代</th><th>報酬</th><th>親</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
+      <tr><th>世代</th><th>報酬</th><th>親</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>最大手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
     </table></div>
     <p class="meta">1ラインあたり得点は、1列消しだけなら100、すべてテトリスなら200。第8世代までのテトリス回数と1ラインあたり得点は、保存済みのテスト録画を再生して数え直した値だ。</p>
-    <h3>わかったこと</h3>
+    <h3>世代ごとのレポート</h3>
+    <p class="meta">世代の学習が終わるたびに自動で更新される(新しい順)。</p>
+    <ul class="timeline" id="reports"></ul>
+    <h3>わかったこと(第10世代時点のまとめ)</h3>
     <ul>
       <li>v1 で、生き残る力は大きく伸びた。第5・6世代では、5ゲーム中3〜4ゲームがテストの上限(500手)まで生き残った</li>
       <li>一方で、1ラインあたり得点は第8世代まで 104〜118 のままで、ほぼ1列消ししかしていなかった</li>
@@ -229,32 +236,41 @@
 
   <footer>Kev は jaredpalmer/kev(Apache-2.0)、ベースモデルは Qwen3.5(Apache-2.0)。このページの数値は、実力テストの記録から作成した。</footer>
 </main>
+<script src="data.js"></script>
 <script>
-// test results per generation (runs/generations.json + recounted from the test recordings)
-const GENS = [
-  { gen: 0, reward: "-",  parent: null, score: 440,   lines: 4,     pieces: 46.4,  survived: 0, spl: 110.0, tetris: 0.0, min: null },
-  { gen: 1, reward: "v1", parent: 0, score: 1520,  lines: 13.6,  pieces: 73.6,  survived: 0, spl: 111.8, tetris: 0.0, min: 11.7 },
-  { gen: 2, reward: "v1", parent: 1, score: 10080, lines: 88.4,  pieces: 263,   survived: 0, spl: 114.0, tetris: 0.4, min: 26.5 },
-  { gen: 3, reward: "v1", parent: 2, score: 1900,  lines: 18.2,  pieces: 86.8,  survived: 0, spl: 104.4, tetris: 0.0, min: 29.0 },
-  { gen: 4, reward: "v1", parent: 3, score: 5340,  lines: 46.6,  pieces: 159.2, survived: 0, spl: 114.6, tetris: 0.0, min: 34.6 },
-  { gen: 5, reward: "v1", parent: 4, score: 17620, lines: 153.4, pieces: 419.2, survived: 3, spl: 114.9, tetris: 0.6, min: 50.1 },
-  { gen: 6, reward: "v1", parent: 5, score: 20160, lines: 171.2, pieces: 457.6, survived: 4, spl: 117.8, tetris: 0.2, min: 53.7 },
-  { gen: 7, reward: "v1", parent: 6, score: 15000, lines: 134.8, pieces: 379.2, survived: 1, spl: 111.3, tetris: 0.0, min: 53.4 },
-  { gen: 8, reward: "v1", parent: 7, score: 15360, lines: 135.4, pieces: 378.2, survived: 1, spl: 113.4, tetris: 0.4, min: 56.8 },
-  { gen: 9, reward: "v2", parent: 6, score: 14480, lines: 120.8, pieces: 345.2, survived: 0, spl: 119.9, tetris: 1.6, min: 27.4 },
-];
+// written by kev_tetris.site into data.js after every generation
+const DATA = window.KEV_DATA || { gens: [], updated: "-", training: {} };
+const GENS = DATA.gens.filter(g => g.score != null);
 const fmt = n => n == null ? "-" : Number(n).toLocaleString("ja-JP");
 const colorOf = g => g.reward === "v2" ? "var(--s2)" : "var(--s1)";
+
+document.getElementById("updated").textContent = DATA.updated;
+const tr_ = DATA.training || {};
+document.getElementById("current").textContent = tr_.state === "running" || tr_.state === "paused"
+  ? `第${tr_.gen}世代を学習中` : "学習は停止中";
+if (GENS.length) {
+  const best = GENS.reduce((a, b) => (b.score > a.score ? b : a));
+  const most = GENS.reduce((a, b) => (b.tetris > a.tetris ? b : a));
+  document.getElementById("k1").textContent = fmt(Math.round(best.score));
+  document.getElementById("k1l").textContent = `最高の平均得点(第${best.gen}世代・${best.reward})`;
+  document.getElementById("k2").textContent = "× " + Math.round(best.score / GENS[0].score);
+  document.getElementById("k3").textContent = most.tetris.toFixed(1) + " 回";
+  document.getElementById("k3l").textContent = `1ゲームあたりのテトリス(最多: 第${most.gen}世代)`;
+  document.getElementById("k4").textContent = GENS.length + " 世代";
+  document.getElementById("k4l").textContent = `完了した世代数(第0〜${GENS[GENS.length - 1].gen}世代)`;
+}
 
 const table = document.getElementById("resultTable");
 for (const g of GENS) {
   const tr = document.createElement("tr");
   tr.innerHTML = `<td>第${g.gen}世代</td><td>${g.reward === "-" ? "学習前" : `<span class="tag ${g.reward}">${g.reward}</span>`}</td>
-    <td>${g.parent == null ? "-" : "第" + g.parent + "世代"}</td><td class="num">${fmt(g.score)}</td><td class="num">${g.lines}</td>
-    <td class="num">${g.pieces}</td><td class="num">${g.survived}/5</td><td class="num">${g.spl.toFixed(1)}</td>
+    <td>${g.parent == null ? "-" : "第" + g.parent + "世代"}</td><td class="num">${fmt(Math.round(g.score))}</td><td class="num">${g.lines}</td>
+    <td class="num">${g.pieces}</td><td class="num">${fmt(g.best_pieces)}</td><td class="num">${g.survived}/${g.games}</td><td class="num">${g.spl.toFixed(1)}</td>
     <td class="num">${g.tetris.toFixed(1)}</td><td class="num">${g.min == null ? "-" : g.min + "分"}</td>`;
   table.appendChild(tr);
 }
+document.getElementById("reports").innerHTML = [...GENS].reverse()
+  .map(g => `<li><b>第${g.gen}世代 <span class="meta">${g.created || ""}</span></b>${g.report}</li>`).join("");
 
 function bars(svg, key, niceSteps, label) {
   const W = svg.clientWidth, H = svg.clientHeight, m = { l: 56, r: 12, t: 22, b: 26 };
@@ -278,6 +294,7 @@ function bars(svg, key, niceSteps, label) {
 function draw() {
   bars(document.getElementById("scoreChart"), "score", [1000, 2000, 5000, 10000, 20000], "平均得点");
   bars(document.getElementById("tetrisChart"), "tetris", [0.5, 1, 2, 5], "テトリス/ゲーム");
+  bars(document.getElementById("piecesChart"), "pieces", [100, 250], "平均手数");
 }
 addEventListener("resize", draw); draw();
 

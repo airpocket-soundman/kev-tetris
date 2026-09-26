@@ -24,7 +24,7 @@ import argparse, json, queue, random, shlex, subprocess, sys, threading, time, u
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import generations, kevenv, live, proc, progress, replays, rl
+from . import generations, kevenv, live, proc, progress, replays, rl, site
 from .policy import ROOT, Decision, HeuristicPolicy, KevPolicy, KevServer, RandomPolicy
 from .tetris import Game, PIECES
 
@@ -168,7 +168,10 @@ def watch_training(hub: Hub, trainer: Trainer, stop):
         except OSError: mtime = None
         if mtime != last_gens:
             last_gens = mtime
-            if mtime: hub.publish("gens", progress.gens_event())
+            if mtime:
+                hub.publish("gens", progress.gens_event())
+                # a generation was registered (or the server just started): refresh the GitHub Pages record
+                threading.Thread(target=lambda: site.log(f"auto: {site.publish()}"), daemon=True).start()
         time.sleep(1)
 
 
