@@ -12,10 +12,15 @@ services:
     working_dir: /work
     volumes:
       - .:/work
-      - ${USERPROFILE}/.cache/huggingface:/root/.cache/huggingface
+      - kev-hf:/root/.cache/huggingface   # model files inside Docker: reading them from the Windows share took ~3.5 min per load
     environment:
       KEV_HOME: /opt/kev
       KEV_PYTHON: /opt/venv/bin/python
       KEV_CUDA_GRAPHS: "0"        # 4B on 16 GB: graphs stay off (docs/speedup-plan.md, section 7)
+      KEV_FUSED: "0"              # kev.serve's fused Triton kernels kill the WSL VM on the first request (RTX 5060 Ti); fla alone is fine
       HF_HUB_DISABLE_SYMLINKS: "1"
     command: ["python", "-m", "kev_tetris.rl", "--generations", "0"]
+
+volumes:
+  kev-hf:
+    external: true   # filled once from %USERPROFILE%\.cache\huggingface (docs/speedup-plan.md)

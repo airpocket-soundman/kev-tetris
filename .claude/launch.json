@@ -6,7 +6,9 @@
       "runtimeExecutable": "python",
       "runtimeArgs": [
         "-m",
-        "kev_tetris.stream"
+        "kev_tetris.stream",
+        "--train_launcher",
+        "docker"
       ],
       "port": 8765
     },

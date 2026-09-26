@@ -119,7 +119,7 @@
       <tr><th>項目</th><th>内容</th></tr>
       <tr><td>モデル</td><td>Kev-4B(<code>jaredpalmer/kev-4b</code>)。ベースは Qwen3.5-4B-Base、LoRA とポインタヘッドで選択肢の確率を出す</td></tr>
       <tr><td>GPU</td><td>NVIDIA GeForce RTX 5060 Ti(VRAM 16GB)</td></tr>
-      <tr><td>OS</td><td>Windows 11。第10世代までは Kev を Windows ネイティブ(Python 3.12)で実行。<b>第11世代からは Docker(WSL2 の Linux コンテナ)に移行中</b>。配信サーバーは Windows のまま</td></tr>
+      <tr><td>OS</td><td>Windows 11。第10世代までは Kev を Windows ネイティブ(Python 3.12)で実行。<b>第11世代からは Docker(WSL2 の Linux コンテナ)で実行</b>。配信サーバーは Windows のまま</td></tr>
       <tr><td>ソフトウェア</td><td>PyTorch 2.8.0 + CUDA 12.8、bfloat16。CUDA グラフは無効(16GB での安定性を優先)。コンテナでは高速化ライブラリ(flash-linear-attention、causal-conv1d)を追加</td></tr>
       <tr><td>速さ</td><td>高速化前: 推論 約0.36秒/手(中央値)、学習 約2.2秒/手、1世代 30〜55分。高速化後は <a href="#speedup">高速化の効果</a> に載せる</td></tr>
       <tr><td>VRAM</td><td>推論 約10GB、学習中 約13GB</td></tr>
@@ -200,7 +200,7 @@
       <li><b>学習時の長さの上限を拡大</b>v2 で問いかけが長くなり、第10世代の学習が上限超過で止まったため(1024 → 1536)</li>
       <li><b>世代ごとの結果を GitHub Pages に自動公開</b>世代が終わるたびに、このページの成績とレポートが更新される</li>
       <li><b>v2 の第9・10世代</b>テトリスは増えた(第9世代で1.6回/ゲーム)が、生き残る手数は第6世代の平均458手から240手(第10世代)まで落ちた。生存と高得点は両立できる水準なので、学習の不足と見ている</li>
-      <li class="todo"><b>高速化のため学習を一時停止(第11世代の途中)</b>Docker と高速化ライブラリへの移行が終わったら、第10世代から再開する。作業中は配信画面に「高速化改良中」を表示</li>
+      <li><b>高速化のため学習を一時停止し、Docker に移行</b>作業中は配信画面に「高速化改良中」を表示した。Kev の融合カーネルが WSL を落とす問題を切り分けて回避し、第10世代から、コンテナで学習を再開した</li>
     </ul>
   </section>
 
@@ -215,7 +215,7 @@
     </div>
     <p class="meta">保留中の案: 練習試合では穴を開けない候補を優先する / くじ引きの温度を下げる / 1世代で学習する手の数に上限を設ける</p>
 
-    <h3 id="speedup">高速化(進行中)</h3>
+    <h3 id="speedup">高速化(推論は完了、学習は測定中)</h3>
     <p>1世代に30〜55分かかっているのを縮める。今回は、<b>Kev-4B とこれまでの学習結果(第10世代まで)をそのまま引き継ぎ</b>、実行環境だけを入れ替える。詳しい構想は <a href="speedup-plan.html">高速化構想</a> にある。</p>
     <div class="card">
       <p><b>遅い原因</b>: (1) Qwen3.5 の DeltaNet と畳み込みに使う高速化ライブラリ(flash-linear-attention、causal-conv1d)が Windows では入らず、遅い標準実装で動いている。(2) 16GB での安定性を優先して、CUDA グラフを無効にしている。(3) 1手ずつ順番に問い合わせていて、まとめ処理を使っていない。</p>
@@ -224,28 +224,33 @@
     <div class="tablewrap"><table>
       <tr><th>段階</th><th>内容</th><th>状態</th></tr>
       <tr><td>1</td><td>コンテナから GPU を使えることを確認する(RTX 5060 Ti、16GB、ドライバ 591.86)</td><td><span class="status done">完了</span></td></tr>
-      <tr><td>2</td><td>Kev(デプロイ済みと同じコミット)、torch 2.8 + CUDA 12.8、高速化ライブラリを入れたイメージを作る(causal-conv1d は RTX 50 系向けにビルドする)</td><td><span class="status now">作業中</span></td></tr>
-      <tr><td>3</td><td>コンテナで Kev-4B の推論と学習の速さを測り、Windows と比べる</td><td><span class="status next">これから</span></td></tr>
-      <tr><td>4</td><td>第10世代から、コンテナで学習を再開する</td><td><span class="status next">これから</span></td></tr>
+      <tr><td>2</td><td>Kev(デプロイ済みと同じコミット)、torch 2.8 + CUDA 12.8、高速化ライブラリを入れたイメージを作る(causal-conv1d は RTX 50 系向けにビルドする)</td><td><span class="status done">完了</span></td></tr>
+      <tr><td>3</td><td>コンテナで Kev-4B の推論と学習の速さを測り、Windows と比べる</td><td><span class="status now">推論は完了、学習は測定中</span></td></tr>
+      <tr><td>4</td><td>第10世代から、コンテナで学習を再開する</td><td><span class="status done">再開済み(第11世代〜)</span></td></tr>
       <tr><td>5</td><td>練習試合とテストの複数ゲームを同時に進める</td><td><span class="status next">未着手</span></td></tr>
       <tr><td>6</td><td>Kev-0.8B + CUDA グラフを試し、4B から蒸留する。成績が 4B に届かなければ 4B を使い続ける</td><td><span class="status next">未着手</span></td></tr>
     </table></div>
     <h3>高速化の効果</h3>
     <div class="tablewrap"><table id="speedTable">
       <tr><th>項目</th><th>Windows(高速化前)</th><th>Docker + 高速化ライブラリ</th><th>変化</th></tr>
-      <tr><td>推論(1手、中央値)</td><td class="num">約 360 ms</td><td class="num">測定中</td><td class="num">-</td></tr>
-      <tr><td>推論(1手、90パーセンタイル)</td><td class="num">約 610 ms</td><td class="num">測定中</td><td class="num">-</td></tr>
+      <tr><td>推論(1手、中央値)</td><td class="num">430 ms</td><td class="num">318 ms</td><td class="num hl">約 26% 短縮</td></tr>
+      <tr><td>推論(1手、90パーセンタイル)</td><td class="num">723 ms</td><td class="num">540 ms</td><td class="num hl">約 25% 短縮</td></tr>
+      <tr><td>モデルの読み込み</td><td class="num">約 1 分</td><td class="num">約 16 秒</td><td class="num hl">約 4 分の 1</td></tr>
       <tr><td>学習(1手)</td><td class="num">約 2.2 秒</td><td class="num">測定中</td><td class="num">-</td></tr>
       <tr><td>1世代の所要時間</td><td class="num">30〜55 分</td><td class="num">測定中</td><td class="num">-</td></tr>
     </table></div>
-    <p class="meta">高速化前の値は、第6〜10世代のテスト記録と学習ログから求めた。測定が終わり次第、この表を更新する。</p>
+    <p class="meta">推論は、第10世代のモデルで、テストの1ゲーム目と同じブロック順・同じ局面の120手を比べた(Windows 側は第10世代のテスト記録の値)。コンテナの最初の1手だけは、Triton のコンパイルで約23秒かかる(サーバー起動ごとに1回)。学習の値は、第11世代の学習段階が終わり次第更新する。</p>
+    <div class="card">
+      <p><b>つまずいた点</b>: コンテナで Kev をサーバーとして動かすと、最初の問い合わせで WSL(Docker の仮想マシン)ごと落ちた。推論の計算だけを直接動かすと落ちなかったため、サーバーだけが使う経路を順に切り分けた。原因は、flash-linear-attention があると Kev が自動で有効にする独自の融合カーネル(<code>fused_qwen35</code>)だった。これを無効にし(<code>KEV_FUSED=0</code>)、高速化ライブラリそのものは使い続けている。</p>
+      <p><b>モデルの置き場所</b>: Windows のフォルダを共有して読み込むと、起動に約4分半かかった。Docker 内部の保存領域にコピーして約16秒にした。</p>
+    </div>
 
     <h3>進め方</h3>
     <ul class="timeline">
       <li><b>v1 で生き残りを学習(第1〜8世代)</b><span class="status done">完了</span></li>
-      <li><b>v2 でテトリスを狙わせる(第9〜10世代)</b><span class="status done">一時停止中(高速化の作業のため)</span></li>
-      <li class="todo"><b>高速化: Docker + 高速化ライブラリ(4B のまま)</b><span class="status now">作業中</span></li>
-      <li class="todo"><b>v2 の学習を再開(第11世代〜、コンテナで実行)</b><span class="status next">高速化の完了後</span></li>
+      <li><b>v2 でテトリスを狙わせる(第9〜10世代、Windows)</b><span class="status done">完了</span></li>
+      <li><b>高速化: Docker + 高速化ライブラリ(4B のまま)</b><span class="status done">推論は約26%短縮。学習は測定中</span></li>
+      <li class="todo"><b>v2 の学習を再開(第11世代〜、コンテナで実行)</b><span class="status now">進行中</span></li>
       <li class="todo"><b>v2 の結果を評価</b><span class="status next">再開後の数世代で判断</span></li>
       <li class="todo"><b>v3 に進む(10手ウィンドウ、滑り込み、穴の報酬)</b><span class="status next">評価の結果次第</span></li>
       <li class="todo"><b>さらなる高速化(複数ゲームの同時進行、0.8B + CUDA グラフの試行)</b><span class="status next">未着手</span></li>
