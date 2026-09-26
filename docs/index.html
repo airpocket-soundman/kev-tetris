@@ -180,7 +180,7 @@
       <svg class="chart" id="piecesChart" role="img" aria-label="世代ごとの平均手数" style="height:200px"></svg>
     </div>
     <div class="tablewrap"><table id="resultTable">
-      <tr><th>世代</th><th>報酬</th><th>親</th><th>得点/ミノ</th><th>ライン/ミノ</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>最大手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
+      <tr><th>世代</th><th>報酬</th><th>親</th><th>得点/ミノ</th><th>ライン/ミノ</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>最大手数</th><th>上限まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
     </table></div>
     <p class="meta">1ラインあたり得点は、1列消しだけなら100、すべてテトリスなら200。第8世代までのテトリス回数と1ラインあたり得点は、保存済みのテスト録画を再生して数え直した値だ。</p>
     <h3>世代ごとのレポート</h3>
@@ -282,7 +282,7 @@
       <tr><td>3</td><td>コンテナで Kev-4B の推論と学習の速さを測り、Windows と比べる</td><td><span class="status done">完了(推論 約26%短縮)</span></td></tr>
       <tr><td>4</td><td>第10世代から、コンテナで学習を再開する</td><td><span class="status done">再開済み(第11世代〜)</span></td></tr>
       <tr><td>5</td><td>練習試合の複数ゲームを同時に進める</td><td><span class="status done">完了(約2.6倍)</span></td></tr>
-      <tr><td>6</td><td>Kev-0.8B + CUDA グラフを試し、4B から蒸留する。成績が 4B に届かなければ 4B を使い続ける</td><td><span class="status next">未着手</span></td></tr>
+      <tr><td>6</td><td>Kev-0.8B + CUDA グラフを試し、4B から蒸留する。成績が 4B に届かなければ 4B を使い続ける</td><td><span class="status done">完了(第23世代〜0.8B、1手 約196ms)</span></td></tr>
     </table></div>
     <h3>高速化レポート: 何をして、どれだけ速くなったか</h3>
     <div class="tablewrap"><table>
