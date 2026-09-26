@@ -25,8 +25,9 @@ from pathlib import Path
 import numpy as np
 
 from . import generations, kevenv, live, proc, replays, teacher
-from .interface import to_record
+from .interface import VALUE_QUESTION, to_record, to_value_request
 from .policy import KevPolicy, KevServer
+from .search import KevSearchPolicy
 from .tetris import RULES, Game, board_features
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -119,6 +120,7 @@ class Step:
     new_enclosed: int = 0
     teacher_record: dict | None = None   # the same position labelled with the lookahead search's move
     agrees: bool = True                  # the search picked the move that was played
+    value_request: dict | None = None    # "how good is this board" on this position, next piece unknown (RL)
 
 
 @dataclass
@@ -182,9 +184,11 @@ def value_features(f: dict) -> list[float]:
             f["hole_depth"], f["hole_rows"]]
 
 
-def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None, search=None) -> Episode:
+def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None, search=None,
+                 values: bool = False) -> Episode:
     """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it.
-    board: a starting board (a Tetris drill) instead of an empty one."""
+    board: a starting board (a Tetris drill) instead of an empty one. A decision carrying `label` (Kev's own search,
+    RL) is its own teacher. values: keep each position's value question for value labels."""
     game, ep = Game(seed=seed), Episode(seed)
     if board is not None:   # a 20-row drill under the hidden rows of a rules-3 board
         game.board = [[0] * len(board[0]) for _ in range(len(game.board) - len(board))] + [row[:] for row in board]
@@ -193,8 +197,10 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         d = policy.decide(game)
         rec = to_record(game, placements, d.placement.key)
         t_rec, agrees = None, True
-        if search:   # the teacher's move for this position (expert iteration): same request, another label
-            key = search(game, placements)
+        vreq = {k: v for k, v in to_value_request(game).items() if k != "model"} if values else None
+        own = getattr(d, "label", None)
+        if search or own:   # the teacher's move for this position (expert iteration): same request, another label
+            key = search(game, placements) if search else own
             agrees = key == d.placement.key
             t_rec = rec if agrees else {**rec, "questions": {"move": {**rec["questions"]["move"], "label": key}}}
         before = board_features(game.board)
@@ -205,7 +211,7 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b), value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0,
-                             teacher_record=t_rec, agrees=agrees))
+                             teacher_record=t_rec, agrees=agrees, value_request=vreq))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
@@ -268,6 +274,31 @@ def assign_window_advantages(episodes: list[Episode], window: int = 10, tetris_b
     for x, total, n in sums.values():
         x.adv = total / n; out.append(x)
     return out
+
+
+def value_records(episodes: list[Episode], gamma: float, truncate_tail: int = 60) -> tuple[list[dict], list[float]]:
+    """Value labels (RL): each position's discounted return, binned into the 5 levels of the value question by the
+    returns' quintiles. -> (labelled value requests, the mean return of each level: what a level is worth to the search).
+    Positions in the last `truncate_tail` moves of a game cut off by the piece cap are left out: their future is missing."""
+    rows = []
+    for ep in episodes:
+        g = 0.0
+        for s in reversed(ep.steps):
+            g = s.reward + gamma * g; s.ret = g
+        keep = ep.steps if ep.died else ep.steps[:max(0, len(ep.steps) - truncate_tail)]
+        rows += [(s.value_request, s.ret) for s in keep if s.value_request]
+    if not rows: return [], []
+    rets = np.array([r for _, r in rows])
+    edges = np.quantile(rets, [0.2, 0.4, 0.6, 0.8])
+    lv = np.searchsorted(edges, rets, side="right")
+    means = [float(rets[lv == i].mean()) if (lv == i).any() else float(np.quantile(rets, 0.1 + 0.2 * i)) for i in range(5)]
+    recs = [{**q, "questions": {"value": {**q["questions"]["value"], "label": int(l)}}} for (q, _), l in zip(rows, lv)]
+    return recs, means
+
+
+def level_value(means: list[float]):
+    """Kev's answer to the value question (probabilities by level) -> an expected return."""
+    return lambda probs: sum(float(probs.get(str(i), 0.0)) * m for i, m in enumerate(means))
 
 
 MAX_RECORD_CHARS = 5200   # ~2.2 chars per token: keeps a record inside kev.train's context at --max_state 2048
@@ -437,6 +468,9 @@ def run_loop(a, ctl: Control):
         # practice: sample only among moves that seal no hole while there are any (5% of moves unrestricted)
         allow = (lambda game, ps: None if rng.random() < a.hole_free_eps else
                  [p for p in ps if game.features(p).new_enclosed <= 0]) if temperature > 0 else None
+        if temperature > 0 and rl_means:   # RL practice: Kev's own lookahead, judged by Kev's own value answers
+            return KevSearchPolicy(srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), level_value(rl_means),
+                                   top_k=a.search_k, explore=a.explore, gamma=a.gamma, seed=rng.randrange(1 << 30), allow=allow)
         return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow,
                          explore=a.explore, top_k=a.top_k)
 
@@ -539,6 +573,10 @@ def run_loop(a, ctl: Control):
         else: pool = same_rules or [x for x in gens if x.get("eval")]
         prev = max(pool, key=lambda x: x["eval"]["mean_score"])
         if a.generations and g > a.generations: break   # 0 = until stopped
+        rl = a.learner == "rl" and not a.demo
+        # the parent's value levels, once an RL generation has trained them; before that (the first RL generation) the
+        # lookahead search labels the moves and the value answers are only being learned
+        rl_means = prev.get("value_means") if rl else None
         t0 = time.time()
 
         ctl.report(force=True, phase="collect", gen=g, detail=f"第{prev['gen']}世代 を読み込み中", progress=0.0)
@@ -546,7 +584,7 @@ def run_loop(a, ctl: Control):
         with serving(prev["run"]) as srv:
             show, pieces_now, done = Showcase(), {}, []
             search = (lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
-                                                            potential, a.teacher_first_k)) if a.teacher and not a.demo else None
+                                                            potential, a.teacher_first_k)) if (a.teacher or rl) and not a.demo and not rl_means else None
 
             def practice_job(i, seed, drill, pol):
                 def on_step(game, d):
@@ -561,7 +599,7 @@ def run_loop(a, ctl: Control):
                 def run():
                     show.start(i)
                     try:
-                        ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search)
+                        ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search, values=rl)
                     finally:
                         show.end(i)
                     done.append(i); pieces_now[i] = a.max_pieces
@@ -573,7 +611,21 @@ def run_loop(a, ctl: Control):
                 jobs.append(practice_job(i, rng.randrange(1 << 30), drill, policy(srv, prev["gen"], a.temperature)))
             eps = run_games(a.parallel, jobs)
         steps = assign_window_advantages(eps, a.window)
-        if a.teacher and not a.demo:
+        means = None
+        if rl:
+            # RL: moves labelled by the search (Kev's own, or the hand one in the first RL generation), disagreements
+            # first; plus value labels from the returns the games actually produced
+            fits = lambda r: r and len(json.dumps(r)) <= MAX_RECORD_CHARS
+            pool = [s for e in eps for s in e.steps if fits(s.teacher_record)]
+            diff = [s.teacher_record for s in pool if not s.agrees]; same = [s.teacher_record for s in pool if s.agrees]
+            rng.shuffle(diff); rng.shuffle(same)
+            vrecs, means = value_records(eps, a.gamma)
+            vrecs = [r for r in vrecs if fits(r)]; rng.shuffle(vrecs)
+            recs = (diff + same[:max(0, a.teacher_cap // 4)])[:a.teacher_cap] + vrecs[:a.value_cap]
+            rng.shuffle(recs)
+            print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
+                  f"level means {[round(m, 1) for m in means]}", flush=True)
+        elif a.teacher and not a.demo:
             # expert iteration: the search's moves on the positions Kev reached, disagreements first (they teach most)
             fits = lambda s: s.teacher_record and len(json.dumps(s.teacher_record)) <= MAX_RECORD_CHARS
             pool = [s for s in steps if fits(s)]
@@ -599,7 +651,8 @@ def run_loop(a, ctl: Control):
         merged = data_dir / f"train-{g:03d}.jsonl"
         # replay buffer: records of the latest generations made the same way (same reward version, teacher or not)
         same = sorted(x["gen"] for x in gens if x.get("reward", "v1") == REWARD_VERSION
-                      and bool(x.get("teacher")) == bool(a.teacher))[-a.buffer_gens:] if a.buffer_gens else []
+                      and bool(x.get("teacher")) == bool(a.teacher) and x.get("learner") == (a.learner if rl else None)
+                      )[-a.buffer_gens:] if a.buffer_gens else []
         parts = [data_dir / f"gen-{k:03d}.jsonl" for k in same + [g]]   # only records chosen under this reward
         if a.elite_games and not a.teacher and elite.exists(): parts.append(elite)
         merged.write_text("".join(p.read_text(encoding="utf-8") for p in parts if p.exists()), encoding="utf-8")
@@ -622,7 +675,8 @@ def run_loop(a, ctl: Control):
             ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g),
                           parallel=a.test_parallel)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
-                 "rules": RULES, "teacher": bool(a.teacher),
+                 "rules": RULES, "teacher": bool(a.teacher) and not rl,
+                 **({"learner": "rl", "value_means": means, "search": "kev" if rl_means else "hand"} if rl else {}),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
                            "minutes": round((time.time() - t0) / 60, 1)},
@@ -658,6 +712,11 @@ def main(argv=None):
     ap.add_argument("--parallel", type=int, default=4, help="games played at the same time (practice and tests); more is faster overall "
                     "but each game waits longer for Kev (8 games: ~2.3 s per move on 4B without CUDA graphs)")
     ap.add_argument("--teacher", type=int, choices=[0, 1], default=1, help="train on a two-piece lookahead search's moves (v4 part 2)")
+    ap.add_argument("--learner", choices=["teacher", "rl"], default="teacher",
+                    help="rl: Kev's own lookahead + value answers (expert iteration); set in runs/model.json")
+    ap.add_argument("--search_k", type=int, default=4, help="RL: Kev's likeliest moves the lookahead judges")
+    ap.add_argument("--gamma", type=float, default=0.97, help="RL: discount of the value labels' returns")
+    ap.add_argument("--value_cap", type=int, default=600, help="RL: value records per generation")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
     ap.add_argument("--elite_games", type=int, default=2, help="practice games per generation whose good moves join the elite set")
