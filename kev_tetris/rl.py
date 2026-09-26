@@ -435,13 +435,13 @@ def run_loop(a, ctl: Control):
         def on_step(i, game):
             ctl.checkpoint()
             pieces_now[i] = game.pieces if not game.over else a.eval_max_pieces
-            ctl.report(detail=f"テスト {a.eval_games}ゲーム・{a.parallel}ゲーム同時",
+            ctl.report(detail=f"テスト {len(pieces_now)}/{a.eval_games} ゲーム目・{game.lines}ライン",
                        progress=min(1.0, sum(min(1.0, p / a.eval_max_pieces) for p in pieces_now.values()) / a.eval_games))
         return on_step
 
     def test_feed(gen):
         return lambda i, ev: feed.publish({"gen": gen, "phase": "test", "game": i + 1, "games": a.eval_games,
-                                           "max_pieces": a.eval_max_pieces, "training_gen": gen, "parallel": a.parallel}, ev)
+                                           "max_pieces": a.eval_max_pieces, "training_gen": gen, "parallel": a.test_parallel}, ev)
 
     if not any(g["gen"] == 0 for g in load()):
         start = "demo:0" if a.demo else a.start
@@ -449,7 +449,7 @@ def run_loop(a, ctl: Control):
         print(f"[gen 0] evaluating {start}", flush=True)
         with serving(start) as srv:
             ev = evaluate(lambda: policy(srv, 0), eval_seeds, a.eval_max_pieces, tester(0), None if a.demo else 0, test_feed(0),
-                          parallel=a.parallel)
+                          parallel=a.test_parallel)
         entry = {"gen": 0, "run": start, "parent": None, "model": a.model_name, "train": None, "eval": ev}
         demo_gens.append(entry) if a.demo else generations.upsert(entry)
         ctl.report(force=True, last_eval={"gen": 0, **ev})
@@ -549,7 +549,7 @@ def run_loop(a, ctl: Control):
         ctl.report(force=True, phase="test", detail=f"第{g}世代 を読み込み中", progress=0.0)
         with serving(run) as srv:
             ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g),
-                          parallel=a.parallel)
+                          parallel=a.test_parallel)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
                  "rules": RULES, "teacher": bool(a.teacher),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
@@ -579,6 +579,7 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
+    ap.add_argument("--test_parallel", type=int, default=1, help="test games at the same time: 1 = one after another, so the stream shows each whole game")
     ap.add_argument("--parallel", type=int, default=4, help="games played at the same time (practice and tests); more is faster overall "
                     "but each game waits longer for Kev (8 games: ~2.3 s per move on 4B without CUDA graphs)")
     ap.add_argument("--teacher", type=int, choices=[0, 1], default=1, help="train on a two-piece lookahead search's moves (v4 part 2)")
