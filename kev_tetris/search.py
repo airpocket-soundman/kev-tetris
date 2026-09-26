@@ -11,7 +11,7 @@ Bootstrap: before Kev's value answers have been trained (the first RL generation
 """
 from __future__ import annotations
 
-import copy, json, random, time, urllib.request
+import copy, json, math, random, time, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from .interface import read_answer, to_request, to_value_request
@@ -21,10 +21,11 @@ from .tetris import Game, apply_placement, board_features
 
 class KevSearchPolicy:
     def __init__(self, base_url: str, reward, value_of_level, top_k: int = 4, explore: float = 0.15, gamma: float = 0.97,
-                 fallback_value=None, seed: int | None = None, timeout: float = 300, allow=None):
+                 fallback_value=None, seed: int | None = None, timeout: float = 300, allow=None, value_scale: float = 1.0):
         self.base_url, self.reward, self.value_of_level = base_url.rstrip("/"), reward, value_of_level
         self.top_k, self.explore, self.gamma, self.fallback_value = top_k, explore, gamma, fallback_value
         self.rng, self.timeout, self.allow = random.Random(seed), timeout, allow
+        self.value_scale = max(1e-6, value_scale)   # return units per nat of Kev's move prior (PUCT-like anchor)
 
     def _ask(self, req: dict) -> dict:
         r = urllib.request.Request(f"{self.base_url}/v1/systemone", json.dumps(req).encode(), {"content-type": "application/json"})
@@ -56,7 +57,9 @@ class KevSearchPolicy:
                 if died: return 0.0
                 return self.value_of_level(self._ask(to_value_request(after))["answers"]["value"]["probabilities"])
             with ThreadPoolExecutor(len(cands)) as ex: values = list(ex.map(value, cands))
-        q = [r + self.gamma * v for (_, _, _, r, _), v in zip(cands, values)]
+        # Kev's move prior anchors the search: a young value head cannot overturn a confident move on its own
+        q = [math.log(max(probs.get(p.key, 0.0), 1e-6)) + (r + self.gamma * v) / self.value_scale
+             for (p, _, _, r, _), v in zip(cands, values)]
         best = cands[max(range(len(q)), key=q.__getitem__)][0]
         chosen = best
         if self.rng.random() < self.explore and len(cands) > 1:    # explore among the searched moves

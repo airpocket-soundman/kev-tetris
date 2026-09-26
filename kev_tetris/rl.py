@@ -470,11 +470,13 @@ def run_loop(a, ctl: Control):
                  [p for p in ps if game.features(p).new_enclosed <= 0]) if temperature > 0 else None
         if temperature > 0 and rl_means:   # RL practice: Kev's own lookahead, judged by Kev's own value answers
             return KevSearchPolicy(srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), level_value(rl_means),
-                                   top_k=a.search_k, explore=a.explore, gamma=a.gamma, seed=rng.randrange(1 << 30), allow=allow)
+                                   top_k=a.search_k, explore=a.explore, gamma=a.gamma, seed=rng.randrange(1 << 30), allow=allow,
+                                   value_scale=(rl_means[-1] - rl_means[0]) / 4)
         return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow,
                          explore=a.explore, top_k=a.top_k)
 
     feed = live.Feed()   # every move played here also goes to the stream screen
+    collapsed: set[int] = set()
 
     def distill(g, gens):
         """Distillation into a new model (e.g. Kev-0.8B). The best generation so far (same rules) plays practice games,
@@ -578,7 +580,10 @@ def run_loop(a, ctl: Control):
         rl = a.learner == "rl" and not a.demo
         # the parent's value levels, once an RL generation has trained them; before that (the first RL generation) the
         # lookahead search labels the moves and the value answers are only being learned
-        rl_means = prev.get("value_means") if rl else None
+        # Kev's own search only after `value_warmup` generations of value labels (gen 26: after one, the search's
+        # choices were noise and practice games lasted ~40 pieces), and never right after a collapsed attempt
+        n_rl = sum(1 for x in gens if x.get("learner") == "rl")
+        rl_means = prev.get("value_means") if rl and n_rl >= a.value_warmup and g not in collapsed else None
         t0 = time.time()
 
         ctl.report(force=True, phase="collect", gen=g, detail=f"第{prev['gen']}世代 を読み込み中", progress=0.0)
@@ -612,6 +617,10 @@ def run_loop(a, ctl: Control):
                 drill = make_drill(rng) if a.drill_frac and rng.random() < a.drill_frac else None
                 jobs.append(practice_job(i, rng.randrange(1 << 30), drill, policy(srv, prev["gen"], a.temperature)))
             eps = run_games(a.parallel, jobs)
+        if rl_means and statistics.mean(e.pieces for e in eps) < a.collapse_pieces:
+            print(f"[gen {g}] Kev's search collapsed (mean {statistics.mean(e.pieces for e in eps):.0f} pieces): "
+                  f"collecting again with the hand search", flush=True)
+            collapsed.add(g); continue
         steps = assign_window_advantages(eps, a.window)
         means = None
         if rl:
@@ -717,7 +726,9 @@ def main(argv=None):
     ap.add_argument("--learner", choices=["teacher", "rl"], default="teacher",
                     help="rl: Kev's own lookahead + value answers (expert iteration); set in runs/model.json")
     ap.add_argument("--search_k", type=int, default=4, help="RL: Kev's likeliest moves the lookahead judges")
-    ap.add_argument("--value_cap", type=int, default=600, help="RL: value records per generation")
+    ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
+    ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
+    ap.add_argument("--value_cap", type=int, default=1200, help="RL: value records per generation")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
     ap.add_argument("--elite_games", type=int, default=2, help="practice games per generation whose good moves join the elite set")
