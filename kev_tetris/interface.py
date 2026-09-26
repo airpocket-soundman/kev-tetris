@@ -19,17 +19,20 @@ INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to place 
 
 
 def board_text(board, margin: int = 2) -> str:
-    top = next((y for y in range(HEIGHT) if any(board[y])), HEIGHT)
+    H = len(board)                          # rules 3: hidden rows above the 20 visible ones
+    top = next((y for y in range(H) if any(board[y])), H)
     start = max(0, top - margin)
-    rows = [f"{HEIGHT - y:2d} |" + "".join("#" if c else "." for c in board[y]) + "|" for y in range(start, HEIGHT)]
-    head = f"(rows {HEIGHT} to {HEIGHT - start + 1} are empty)" if start > 0 else ""
+    rows = [f"{H - y:2d} |" + "".join("#" if c else "." for c in board[y]) + "|" for y in range(start, H)]
+    head = f"(rows {H} to {H - start + 1} are empty)" if start > 0 else ""
     cols = "    " + "".join(str(x) for x in range(WIDTH))
     return "\n".join(filter(None, [head, *rows, cols]))
 
 
 def state_text(game: Game) -> str:
     f = board_features(game.board)
-    return (f"Tetris board, {WIDTH} columns x {HEIGHT} rows, '#' filled, '.' empty, row 1 is the floor.\n"
+    hidden = len(game.board) - HEIGHT
+    size = f"{WIDTH} columns x {HEIGHT} rows" + (f" plus {hidden} hidden rows above (pieces appear there)" if hidden else "")
+    return (f"Tetris board, {size}, '#' filled, '.' empty, row 1 is the floor.\n"
             f"{board_text(game.board)}\n"
             f"Current piece: {game.current}. Next piece: {game.next}.\n"
             f"Column heights: {' '.join(map(str, f['heights']))}. Holes: {f['holes']}. "

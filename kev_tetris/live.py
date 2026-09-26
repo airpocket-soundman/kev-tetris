@@ -18,12 +18,16 @@ FRESH_SECONDS = 8.0   # a feed older than this means no game is being played rig
 
 def move_event(game: Game, pre: list, placements: list, d, piece: str) -> dict:
     """The "move" event for a move just played: `game` after the step, `pre` the board before it."""
+    # the page draws the 20 visible rows: boards are cut and cells moved up by the hidden rows (rules 3), and cells in
+    # the hidden rows are left out
+    hidden = len(pre) - len(game.visible(pre))
+    vis = lambda cells: [(x, y - hidden) for x, y in cells if y >= hidden]
     top = sorted(d.probs.items(), key=lambda kv: kv[1], reverse=True)[:3]
     by_key = {p.key: p for p in placements}
-    thinking = [{"key": k, "p": round(p, 3), "cells": by_key[k].cells if k in by_key else [], "chosen": k == d.placement.key}
+    thinking = [{"key": k, "p": round(p, 3), "cells": vis(by_key[k].cells) if k in by_key else [], "chosen": k == d.placement.key}
                 for k, p in top]
-    full = [y for y in range(len(pre)) if all(pre[y][x] or (x, y) in d.placement.cells for x in range(len(pre[0])))]
-    return {**game.snapshot(), "board": pre, "post": game.board, "cells": d.placement.cells, "piece": piece,
+    full = [y - hidden for y in range(hidden, len(pre)) if all(pre[y][x] or (x, y) in d.placement.cells for x in range(len(pre[0])))]
+    return {**game.snapshot(), "board": game.visible(pre), "post": game.visible(), "cells": vis(d.placement.cells), "piece": piece,
             "color": PIECES.index(piece) + 1, "cleared": full, "thinking": thinking, "latency_ms": round(d.latency_ms, 1)}
 
 

@@ -153,8 +153,8 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
     """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it.
     board: a starting board (a Tetris drill) instead of an empty one."""
     game, ep = Game(seed=seed), Episode(seed)
-    if board is not None:
-        game.board = [row[:] for row in board]
+    if board is not None:   # a 20-row drill under the hidden rows of a rules-3 board
+        game.board = [[0] * len(board[0]) for _ in range(len(game.board) - len(board))] + [row[:] for row in board]
     while not game.over and game.pieces < max_pieces:
         placements = game.placements()
         d = policy.decide(game)

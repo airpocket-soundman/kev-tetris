@@ -43,7 +43,10 @@ def _rotations(cells):
 
 
 ROTATIONS = {p: _rotations(c) for p, c in _BASE.items()}
-RULES = 2   # 1: pieces enter from above any column, simplified rotation (generations 0-11); 2: SRS, spawn at the top
+RULES = 3   # 1: pieces enter from above any column, simplified rotation (generations 0-11); 2: SRS, spawn at the top;
+            # 3: rules 2 with the Guideline's hidden rows above the field, block out / lock out, and 15 lock-delay resets
+BUFFER = 4       # rules 3: hidden rows above the 20 visible ones (the Guideline spawns pieces there)
+LOCK_RESETS = 15  # rules 3: moves/rotations allowed while on the ground; reaching a lower row gives them back
 
 
 # --- rules 2: the standard rotation system (SRS) and a spawn at the top ------------------------------------------------
@@ -83,17 +86,17 @@ _KICKS_I = {
 }
 
 
-def _srs_spawn(piece):
-    """(rotation state, box x, box y) where a piece appears: top row, centred."""
+def _srs_spawn(piece, top=0):
+    """(rotation state, box x, box y) where a piece appears: its top at row `top`, centred (left of centre)."""
     n = _SRS_SPAWN[piece][0]
-    return 0, (WIDTH - n) // 2 if piece != "O" else 4, -1 if piece == "I" else 0
+    return 0, (WIDTH - n) // 2 if piece != "O" else 4, top - (1 if piece == "I" else 0)
 
 
 def _srs_fits(board, piece, st):
     r, bx, by = st
     for cx, cy in SRS_SHAPES[piece][r]:
         x, y = bx + cx, by + cy
-        if x < 0 or x >= WIDTH or y < 0 or y >= HEIGHT or board[y][x]: return False
+        if x < 0 or x >= WIDTH or y < 0 or y >= len(board) or board[y][x]: return False
     return True
 
 
@@ -159,12 +162,12 @@ class Features:
 
 
 def column_heights(board):
-    hs = []
+    hs, H = [], len(board)
     for x in range(WIDTH):
         h = 0
-        for y in range(HEIGHT):
+        for y in range(H):
             if board[y][x]:
-                h = HEIGHT - y
+                h = H - y
                 break
         hs.append(h)
     return hs
@@ -172,7 +175,8 @@ def column_heights(board):
 
 def count_holes(board, heights=None):
     heights = heights or column_heights(board)
-    return sum(1 for x in range(WIDTH) for y in range(HEIGHT - heights[x], HEIGHT) if not board[y][x])
+    H = len(board)
+    return sum(1 for x in range(WIDTH) for y in range(H - heights[x], H) if not board[y][x])
 
 
 def wells_depth(heights):
@@ -188,14 +192,15 @@ def wells_depth(heights):
 def cover_split(board, heights=None):
     """-> (enclosed, overhang): covered empty cells, split by whether open air reaches them through empty cells."""
     heights = heights or column_heights(board)
-    open_ = set((x, y) for x in range(WIDTH) for y in range(HEIGHT - heights[x]))
+    H = len(board)
+    open_ = set((x, y) for x in range(WIDTH) for y in range(H - heights[x]))
     q = deque(open_)
     while q:
         x, y = q.popleft()
         for nx, ny in ((x - 1, y), (x + 1, y), (x, y + 1), (x, y - 1)):
-            if 0 <= nx < WIDTH and 0 <= ny < HEIGHT and (nx, ny) not in open_ and not board[ny][nx]:
+            if 0 <= nx < WIDTH and 0 <= ny < H and (nx, ny) not in open_ and not board[ny][nx]:
                 open_.add((nx, ny)); q.append((nx, ny))
-    covered = [(x, y) for x in range(WIDTH) for y in range(HEIGHT - heights[x], HEIGHT) if not board[y][x]]
+    covered = [(x, y) for x in range(WIDTH) for y in range(H - heights[x], H) if not board[y][x]]
     over = sum(1 for c in covered if c in open_)
     return len(covered) - over, over
 
@@ -204,9 +209,10 @@ def ready_rows(board, heights=None):
     """Rows with exactly one empty cell whose column is open above that row: one I piece away from clearing."""
     heights = heights or column_heights(board)
     n = 0
-    for y in range(HEIGHT):
+    H = len(board)
+    for y in range(H):
         empty = [x for x in range(WIDTH) if not board[y][x]]
-        if len(empty) == 1 and HEIGHT - heights[empty[0]] > y: n += 1
+        if len(empty) == 1 and H - heights[empty[0]] > y: n += 1
     return n
 
 
@@ -226,7 +232,7 @@ def board_features(board):
 def _fits(board, cells, ox, oy):
     for cx, cy in cells:
         x, y = ox + cx, oy + cy
-        if x < 0 or x >= WIDTH or y >= HEIGHT: return False
+        if x < 0 or x >= WIDTH or y >= len(board): return False
         if y >= 0 and board[y][x]: return False
     return True
 
@@ -236,7 +242,7 @@ def apply_placement(board, p: Placement, color: int):
     b = [row[:] for row in board]
     for x, y in p.cells: b[y][x] = color
     kept = [row for row in b if not all(row)]
-    cleared = HEIGHT - len(kept)
+    cleared = len(board) - len(kept)
     return [[0] * WIDTH for _ in range(cleared)] + kept, cleared
 
 
@@ -252,6 +258,8 @@ class Game:
     over: bool = False
 
     def __post_init__(self):
+        if self.rules >= 3 and len(self.board) == HEIGHT:   # hidden rows above the visible field
+            self.board = [[0] * WIDTH for _ in range(BUFFER)] + self.board
         self.rng = random.Random(self.seed)
         self.bag: list[str] = []
         self.current = self._draw()
@@ -265,7 +273,61 @@ class Game:
 
     def placements(self, piece: str | None = None, board=None) -> list[Placement]:
         piece, board = piece or self.current, board or self.board
+        if self.rules >= 3: return self._placements_guideline(piece, board)
         return self._placements_srs(piece, board) if self.rules >= 2 else self._placements_v1(piece, board)
+
+    @property
+    def hidden(self) -> int:
+        """Rows above the visible field at the top of self.board."""
+        return len(self.board) - HEIGHT
+
+    def _placements_guideline(self, piece, board) -> list[Placement]:
+        """Rules 3 (Guideline). The piece spawns in the hidden rows right above the field and drops one row at once if it
+        can; overlapping there is a block out (no placement). Moves and rotations are free in the air; on the ground
+        each one uses a lock-delay reset (15), and reaching a new lowest row gives them all back. Every place the piece
+        can lock is a placement; the ones reached by rotating/shifting at the spawn and dropping straight are plain."""
+        top = len(board) - HEIGHT - 2
+        spawn = _srs_spawn(piece, top)
+        if not _srs_fits(board, piece, spawn): return []
+        if _srs_fits(board, piece, (spawn[0], spawn[1], spawn[2] + 1)): spawn = (spawn[0], spawn[1], spawn[2] + 1)
+        fits = lambda st: _srs_fits(board, piece, st)
+        grounded = lambda st: not fits((st[0], st[1], st[2] + 1))
+        cells_of = lambda st: tuple(sorted((st[1] + cx, st[2] + cy) for cx, cy in SRS_SHAPES[piece][st[0]]))
+        out, seen = [], set()
+        # plain drops: shift/rotate at the spawn row while airborne, then straight down
+        plain, q = {spawn}, deque([spawn])
+        while q:
+            st = q.popleft()
+            if grounded(st): continue
+            for nxt in _srs_moves(board, piece, st, down=False):
+                if nxt[2] == spawn[2] and nxt not in plain: plain.add(nxt); q.append(nxt)
+        for r, bx, by in sorted(plain):
+            while fits((r, bx, by + 1)): by += 1
+            c = cells_of((r, bx, by))
+            if c not in seen: seen.add(c); out.append(_as_placement(piece, c, slide=False))
+        # everything else: (state, lowest row reached) -> fewest resets used
+        best = {(spawn, spawn[2]): 0}
+        q = deque([(spawn, spawn[2], 0)])
+        while q:
+            st, low, used = q.popleft()
+            if best.get((st, low), 99) < used: continue
+            on_ground = grounded(st)
+            if on_ground:
+                c = cells_of(st)
+                if c not in seen: seen.add(c); out.append(_as_placement(piece, c, slide=True))
+            nexts = [(st[0], st[1], st[2] + 1)] if not on_ground else []
+            if not (on_ground and used >= LOCK_RESETS):
+                nexts += [n for n in _srs_moves(board, piece, st, down=False)]
+            for nxt in nexts:
+                if not fits(nxt): continue
+                is_drop = nxt[1:] == (st[1], st[2] + 1) and nxt[0] == st[0]
+                n_used = used + (1 if on_ground and not is_drop else 0)
+                n_low = low
+                if nxt[2] > low: n_low, n_used = nxt[2], 0          # a new lowest row: the resets come back
+                key = (nxt, n_low)
+                if best.get(key, 99) > n_used:
+                    best[key] = n_used; q.append((nxt, n_low, n_used))
+        return out
 
     def _placements_srs(self, piece, board) -> list[Placement]:
         """Rules 2. The piece spawns at the top centre; if it overlaps the stack there, there is no placement (game over).
@@ -337,7 +399,7 @@ class Game:
         f = board_features(nb)
         return Features(lines=cleared, holes=f["holes"], new_holes=f["holes"] - b["holes"], max_height=f["max_height"],
                         agg_height=f["agg_height"], bumpiness=f["bumpiness"], wells=f["wells"],
-                        landing=HEIGHT - max(y for _, y in p.cells), max_well=f["max_well"],
+                        landing=len(self.board) - max(y for _, y in p.cells), max_well=f["max_well"],
                         enclosed=f["enclosed"], overhang=f["overhang"], new_enclosed=f["enclosed"] - b["enclosed"],
                         new_overhang=f["overhang"] - b["overhang"], ready_rows=f["ready_rows"])
 
@@ -350,9 +412,16 @@ class Game:
         self.tetrises += cleared == 4
         self.score += LINE_SCORE[cleared]
         self.current, self.next = self.next, self._draw()
-        if not self.placements(): self.over = True
+        if self.rules >= 3 and not cleared and all(y < self.hidden for _, y in p.cells):
+            self.over = True                                 # lock out: locked entirely above the visible field
+        elif not self.placements(): self.over = True       # block out: the next piece cannot appear
         return cleared
 
+    def visible(self, board=None) -> list:
+        """The 20 visible rows of a board (rules 3 keeps hidden rows above them)."""
+        board = self.board if board is None else board
+        return [row[:] for row in board[len(board) - HEIGHT:]]
+
     def snapshot(self) -> dict:
-        return {"board": [row[:] for row in self.board], "current": self.current, "next": self.next, "score": self.score,
+        return {"board": self.visible(), "current": self.current, "next": self.next, "score": self.score,
                 "lines": self.lines, "pieces": self.pieces, "tetrises": self.tetrises, "over": self.over}

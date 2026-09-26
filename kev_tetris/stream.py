@@ -306,16 +306,9 @@ def play(hub, seat, gens, a, stop, next_entry, should_yield=lambda: False):
             break
         except OSError as e:      # the server went away (e.g. the manual Kev was restarted with another model)
             ended = f"Kevとの通信が切れました: {e}"; break
-        top = sorted(d.probs.items(), key=lambda kv: kv[1], reverse=True)[:3]
-        by_key = {p.key: p for p in placements}
-        thinking = [{"key": k, "p": round(p, 3), "cells": by_key[k].cells if k in by_key else [],
-                     "chosen": k == d.placement.key} for k, p in top]
         piece = game.current
-        full = [y for y in range(len(pre)) if all(pre[y][x] or (x, y) in d.placement.cells for x in range(len(pre[0])))]
         game.step(d.placement)
-        hub.publish("move", {**game.snapshot(), "board": pre, "post": game.board, "cells": d.placement.cells, "piece": piece,
-                             "color": PIECES.index(piece) + 1, "cleared": full, "thinking": thinking,
-                             "latency_ms": round(d.latency_ms, 1), "left": a.pieces_per_gen - game.pieces,
+        hub.publish("move", {**live.move_event(game, pre, placements, d, piece), "left": a.pieces_per_gen - game.pieces,
                              "next_gen": next_entry["gen"] if next_entry else None})
         time.sleep(max(0.0, a.move_delay - (time.time() - t0)))
     return {"gen": entry["gen"], "lines": game.lines, "score": game.score, "pieces": game.pieces, "over": game.over,
