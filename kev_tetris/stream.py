@@ -322,11 +322,13 @@ def play(hub, seat, gens, a, stop, next_entry, should_yield=lambda: False):
 
 def follow_training(hub, a, stop, load_gens):
     """Relay the training loop's games (runs/rl_live.json) move by move until it stops playing."""
-    last_seq, last_key = None, None
+    last_seq, last_key, last_sent = None, None, 0.0
     while not stop.is_set():
         data = live.read()
         if not data: return
-        if (data["pid"], data["seq"]) != last_seq:
+        # at most ~2 moves a second reach the page: OBS renders the page and encodes on the GPU Kev is busy with
+        if (data["pid"], data["seq"]) != last_seq and time.time() - last_sent >= a.relay_interval:
+            last_sent = time.time()
             last_seq = (data["pid"], data["seq"])
             info, mv = data["info"], data["move"]
             key = (data["pid"], info["gen"], info["phase"], info["game"])
@@ -452,6 +454,7 @@ def main(argv=None):
     ap.add_argument("--train_launcher", choices=["local", "docker"], default="local", help="where 学習開始 starts the loop: this Python, or the kev service of docker-compose.yml")
     ap.add_argument("--train_args", default="--generations 0", help="arguments for kev_tetris.rl when the control page starts training")
     ap.add_argument("--pieces_per_gen", type=int, default=150, help="a generation's turn ends after this many pieces (or game over)")
+    ap.add_argument("--relay_interval", type=float, default=0.5, help="seconds between relayed training moves (lower = smoother, heavier for OBS)")
     ap.add_argument("--move_delay", type=float, default=0.18, help="seconds per move, so viewers can follow")
     ap.add_argument("--pause", type=float, default=3.0, help="seconds to show a generation's result before the switch")
     ap.add_argument("--need_serve_gb", type=float, default=10.0, help="auto: start a generation's own Kev server only with this much free GPU memory, else replay (~3 for Kev-0.8B)")

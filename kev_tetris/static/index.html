@@ -373,6 +373,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function animate(m) {
   showStats(m); showThinking(m);
   if (!m.piece) { drawBoard(m.board); return; }
+  if (m.turn_text) { drawBoard(m.post); return; }   // relayed training games: one draw per move, no animation (keeps OBS light)
   const fast = moves.length > 2 ? 0.3 : 1;
   const alt = (m.thinking || []).filter(c => !c.chosen).map(c => c.cells);
   drawBoard(m.board, () => alt.forEach(cs => outline(bctx, cs, "rgba(142,152,196,.7)", 2)));
