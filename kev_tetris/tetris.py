@@ -101,14 +101,22 @@ def _srs_moves(board, piece, st, down=True):
     """States one move away: left, right, (soft drop), and both rotations with the SRS kicks."""
     r, bx, by = st
     out = [(r, bx - 1, by), (r, bx + 1, by)] + ([(r, bx, by + 1)] if down else [])
-    if piece != "O":
-        kicks = _KICKS_I if piece == "I" else _KICKS_JLSTZ
-        for r2 in ((r + 1) % 4, (r + 3) % 4):
-            for dx, dy in kicks[(r, r2)]:
-                cand = (r2, bx + dx, by - dy)          # the tables count y upward
-                if _srs_fits(board, piece, cand):
-                    out.append(cand); break              # the first kick that fits is the rotation
+    for turn in (1, -1):
+        st2 = srs_rotate(board, piece, st, turn)
+        if st2: out.append(st2)
     return [s for s in out if _srs_fits(board, piece, s)]
+
+
+def srs_rotate(board, piece, st, turn):
+    """One rotation (turn 1 = clockwise, -1 = counter-clockwise) with the SRS kicks. -> the new state, or None."""
+    if piece == "O": return None                         # O keeps its cells: rotating it changes nothing
+    r, bx, by = st
+    r2 = (r + turn) % 4
+    kicks = _KICKS_I if piece == "I" else _KICKS_JLSTZ
+    for dx, dy in kicks[(r, r2)]:
+        cand = (r2, bx + dx, by - dy)                    # the tables count y upward
+        if _srs_fits(board, piece, cand): return cand      # the first kick that fits is the rotation
+    return None
 
 
 def _as_placement(piece, cells, slide):
