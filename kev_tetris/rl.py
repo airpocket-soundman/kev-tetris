@@ -16,8 +16,8 @@ starts kev.serve for collection and evaluation and stops it before training.
 """
 from __future__ import annotations
 
-import json, os, random, shutil, socket, statistics, subprocess, sys, threading, time
-from concurrent.futures import ThreadPoolExecutor
+import copy, json, os, random, shutil, socket, statistics, subprocess, sys, threading, time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,7 +27,7 @@ import numpy as np
 from . import generations, kevenv, live, proc, replays, teacher
 from .interface import VALUE_QUESTION, to_record, to_value_request
 from .policy import GATE, KevPolicy, KevServer, is_front, set_front
-from .search import KevSearchPolicy, rollout_label
+from .search import KevSearchPolicy, teacher_rollout
 from .tetris import RULES, Game, board_features
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -617,16 +617,20 @@ def run_loop(a, ctl: Control):
             hand = lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
                                                          potential, a.teacher_first_k)
             ro = {"n": 0, "same": 0}
+            pending, pending_lock = [], threading.Lock()
 
             def search(game, ps, d=None):
-                # RL: on a share of the positions Kev's own rollouts pick the label (beyond the teacher); elsewhere the teacher
-                # never on the streamed game: its moves stay as fast as a lone game's
-                if rl and a.rollout_rate and d is not None and not is_front() and rng_ro.random() < a.rollout_rate:
-                    key, _ = rollout_label(game, ps, d.probs, srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), potential,
-                                           a.rollout_k, a.rollout_depth, a.rollout_n, a.gamma, random.Random(rng_ro.random()))
-                    ro["n"] += 1; ro["same"] += key == hand(game, ps)
-                    return key, "rollout"
-                return hand(game, ps)
+                # RL: a share of the positions is set aside for rollouts after the games (CPU, many cores: the stream's
+                # Kev answers are not slowed); until then they carry the teacher's label
+                key = hand(game, ps)
+                if rl and a.rollout_rate and d is not None and rng_ro.random() < a.rollout_rate:
+                    top = [p.key for p in sorted(ps, key=lambda p: d.probs.get(p.key, 0.0), reverse=True)[:a.rollout_k]]
+                    with pending_lock:
+                        token = f"ro{len(pending)}"
+                        pending.append((copy.deepcopy(game), list(dict.fromkeys(top + [key])), rng_ro.randrange(1 << 30),
+                                        a.rollout_depth, a.rollout_n, a.gamma, a.teacher_first_k))
+                    return key, token
+                return key
             if not ((a.teacher or rl) and not a.demo and not rl_means): search = None
 
             def practice_job(i, seed, drill, pol):
@@ -658,6 +662,19 @@ def run_loop(a, ctl: Control):
             print(f"[gen {g}] Kev's search collapsed (mean {statistics.mean(e.pieces for e in eps):.0f} pieces): "
                   f"collecting again with the hand search", flush=True)
             collapsed.add(g); continue
+        if rl and pending:
+            ctl.report(force=True, phase="train", detail=f"ロールアウトで {len(pending)} 局面を検討中", progress=None)
+            t_ro = time.time()
+            with ProcessPoolExecutor(a.rollout_workers) as ex:
+                best = list(ex.map(teacher_rollout, pending, chunksize=2))
+            for e in eps:
+                for s in e.steps:
+                    if s.source and s.source.startswith("ro"):
+                        key = best[int(s.source[2:])]; teacher_key = s.teacher_record["questions"]["move"]["label"]
+                        ro["n"] += 1; ro["same"] += key == teacher_key
+                        s.teacher_record = {**s.record, "questions": {"move": {**s.record["questions"]["move"], "label": key}}}
+                        s.agrees, s.source = key == s.record["questions"]["move"]["label"], "rollout"
+            print(f"[gen {g}] rollouts took {(time.time() - t_ro) / 60:.1f} min", flush=True)
         steps = assign_window_advantages(eps, a.window)
         means = None
         if rl:
@@ -772,6 +789,7 @@ def main(argv=None):
     ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
     ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
+    ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
     ap.add_argument("--rollout_n", type=int, default=2, help="RL: rollouts per move")

@@ -109,3 +109,35 @@ def rollout_label(game: Game, placements, probs: dict, base_url: str, reward, po
     with ThreadPoolExecutor(len(jobs)) as ex: vals = list(ex.map(lambda j: one(*j), jobs))
     worth = {p.key: sum(vals[i * n:(i + 1) * n]) / n for i, p in enumerate(top)}
     return max(worth, key=worth.get), worth
+
+
+def teacher_rollout(job) -> str:
+    """CPU-only rollout label (from gen 39): Kev proposes the candidates (its likeliest moves, plus the teacher's), the
+    teacher's two-piece search plays on after each for `depth` pieces, n times; rewards along the way + the hand potential
+    at the end pick the label. A rollout of the teacher is stronger than the teacher (rollout policy improvement), and it
+    needs no GPU, so it runs on many cores after the practice games without slowing the stream.
+    job: (game, candidate keys, seed, depth, n, gamma, first_k) -> the best key."""
+    from . import rl, teacher
+    game, cands, seed, depth, n, gamma, first_k = job
+    rng = random.Random(seed)
+    reward = lambda b, f, c, d: rl.shaped_reward(b, f, c, d)
+    worth = {}
+    for key in cands:
+        total_all = 0.0
+        for _ in range(n):
+            g = copy.deepcopy(game)
+            g.rng = random.Random(rng.randrange(1 << 30)); g.rng.shuffle(g.bag)
+            move = next(p for p in g.placements() if p.key == key)
+            total, disc = 0.0, 1.0
+            for step in range(depth + 1):
+                before = board_features(g.board)
+                cleared = g.step(move)
+                total += disc * reward(before, board_features(g.board), cleared, g.over); disc *= gamma
+                if g.over or step == depth: break
+                ps = g.placements()
+                k = teacher.search_label(g, ps, reward, rl.potential, first_k)
+                move = next(p for p in ps if p.key == k)
+            if not g.over: total += disc * rl.potential(board_features(g.board))
+            total_all += total
+        worth[key] = total_all / n
+    return max(worth, key=worth.get)
