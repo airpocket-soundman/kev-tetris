@@ -26,7 +26,7 @@ def _recount(gen: int) -> dict:
     if not games: return {}
     tetrises = score = lines = 0
     for r in games:
-        game, pol = Game(seed=r["seed"]), replays.ReplayPolicy(r)
+        game, pol = Game(seed=r["seed"], rules=r.get("rules", 1)), replays.ReplayPolicy(r)
         while not game.over and game.pieces < len(r["moves"]): game.step(pol.decide(game).placement)
         tetrises += game.tetrises; score += game.score; lines += game.lines
     return {"tetris": round(tetrises / len(games), 2), "spl": round(score / max(1, lines), 1),

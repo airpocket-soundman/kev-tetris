@@ -43,6 +43,79 @@ def _rotations(cells):
 
 
 ROTATIONS = {p: _rotations(c) for p, c in _BASE.items()}
+RULES = 2   # 1: pieces enter from above any column, simplified rotation (generations 0-11); 2: SRS, spawn at the top
+
+
+# --- rules 2: the standard rotation system (SRS) and a spawn at the top ------------------------------------------------
+# Shapes in their SRS bounding boxes (y down), spawn orientation first; rotating turns the box clockwise.
+_SRS_SPAWN = {
+    "I": (4, [(0, 1), (1, 1), (2, 1), (3, 1)]),
+    "O": (2, [(0, 0), (1, 0), (0, 1), (1, 1)]),
+    "T": (3, [(1, 0), (0, 1), (1, 1), (2, 1)]),
+    "S": (3, [(1, 0), (2, 0), (0, 1), (1, 1)]),
+    "Z": (3, [(0, 0), (1, 0), (1, 1), (2, 1)]),
+    "J": (3, [(0, 0), (0, 1), (1, 1), (2, 1)]),
+    "L": (3, [(2, 0), (0, 1), (1, 1), (2, 1)]),
+}
+
+
+def _srs_states(n, cells):
+    out, cur = [], list(cells)
+    for _ in range(4):
+        out.append(tuple(cur))
+        cur = [(n - 1 - y, x) for x, y in cur]
+    return out
+
+
+SRS_SHAPES = {p: _srs_states(n, c) for p, (n, c) in _SRS_SPAWN.items()}
+# wall kicks (x right, y UP as in the SRS tables) per (from, to) state: 0 spawn, 1 R, 2 two, 3 L
+_KICKS_JLSTZ = {
+    (0, 1): [(0, 0), (-1, 0), (-1, 1), (0, -2), (-1, -2)], (1, 0): [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)],
+    (1, 2): [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)], (2, 1): [(0, 0), (-1, 0), (-1, 1), (0, -2), (-1, -2)],
+    (2, 3): [(0, 0), (1, 0), (1, 1), (0, -2), (1, -2)], (3, 2): [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)],
+    (3, 0): [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)], (0, 3): [(0, 0), (1, 0), (1, 1), (0, -2), (1, -2)],
+}
+_KICKS_I = {
+    (0, 1): [(0, 0), (-2, 0), (1, 0), (-2, -1), (1, 2)], (1, 0): [(0, 0), (2, 0), (-1, 0), (2, 1), (-1, -2)],
+    (1, 2): [(0, 0), (-1, 0), (2, 0), (-1, 2), (2, -1)], (2, 1): [(0, 0), (1, 0), (-2, 0), (1, -2), (-2, 1)],
+    (2, 3): [(0, 0), (2, 0), (-1, 0), (2, 1), (-1, -2)], (3, 2): [(0, 0), (-2, 0), (1, 0), (-2, -1), (1, 2)],
+    (3, 0): [(0, 0), (1, 0), (-2, 0), (1, -2), (-2, 1)], (0, 3): [(0, 0), (-1, 0), (2, 0), (-1, 2), (2, -1)],
+}
+
+
+def _srs_spawn(piece):
+    """(rotation state, box x, box y) where a piece appears: top row, centred."""
+    n = _SRS_SPAWN[piece][0]
+    return 0, (WIDTH - n) // 2 if piece != "O" else 4, -1 if piece == "I" else 0
+
+
+def _srs_fits(board, piece, st):
+    r, bx, by = st
+    for cx, cy in SRS_SHAPES[piece][r]:
+        x, y = bx + cx, by + cy
+        if x < 0 or x >= WIDTH or y < 0 or y >= HEIGHT or board[y][x]: return False
+    return True
+
+
+def _srs_moves(board, piece, st, down=True):
+    """States one move away: left, right, (soft drop), and both rotations with the SRS kicks."""
+    r, bx, by = st
+    out = [(r, bx - 1, by), (r, bx + 1, by)] + ([(r, bx, by + 1)] if down else [])
+    if piece != "O":
+        kicks = _KICKS_I if piece == "I" else _KICKS_JLSTZ
+        for r2 in ((r + 1) % 4, (r + 3) % 4):
+            for dx, dy in kicks[(r, r2)]:
+                cand = (r2, bx + dx, by - dy)          # the tables count y upward
+                if _srs_fits(board, piece, cand):
+                    out.append(cand); break              # the first kick that fits is the rotation
+    return [s for s in out if _srs_fits(board, piece, s)]
+
+
+def _as_placement(piece, cells, slide):
+    """A resting place as a Placement; rotation and x name the shape the way rules 1 did (so keys stay comparable)."""
+    shape = _normalise(cells)
+    return Placement(piece, ROTATIONS[piece].index(shape), min(x for x, _ in cells), min(y for _, y in cells),
+                     tuple(sorted(cells)), slide=slide)
 
 
 @dataclass(frozen=True)
@@ -162,6 +235,7 @@ def apply_placement(board, p: Placement, color: int):
 @dataclass
 class Game:
     seed: int | None = None
+    rules: int = RULES          # recordings made under rules 1 replay with Game(rules=1)
     board: list = field(default_factory=lambda: [[0] * WIDTH for _ in range(HEIGHT)])
     score: int = 0
     lines: int = 0
@@ -182,9 +256,38 @@ class Game:
         return self.bag.pop()
 
     def placements(self, piece: str | None = None, board=None) -> list[Placement]:
-        """Every final resting place reachable from above, entirely inside the board: first the plain hard drops, then
-        the places only a slide, tuck or rotation after the drop reaches (breadth-first over rotation/column/row)."""
         piece, board = piece or self.current, board or self.board
+        return self._placements_srs(piece, board) if self.rules >= 2 else self._placements_v1(piece, board)
+
+    def _placements_srs(self, piece, board) -> list[Placement]:
+        """Rules 2. The piece spawns at the top centre; if it overlaps the stack there, there is no placement (game over).
+        Plain drops: rotate and shift at the spawn height, then drop straight. Then everything else reachable by
+        moving, rotating (SRS kicks, also after landing) and soft-dropping: slides, tucks and spins."""
+        spawn = _srs_spawn(piece)
+        if not _srs_fits(board, piece, spawn): return []
+        cells_of = lambda st: [(st[1] + cx, st[2] + cy) for cx, cy in SRS_SHAPES[piece][st[0]]]
+        top, q = {spawn}, deque([spawn])
+        while q:                                           # moves before any drop
+            for st in _srs_moves(board, piece, q.popleft(), down=False):
+                if st not in top: top.add(st); q.append(st)
+        out, seen = [], set()
+        for st in sorted(top):
+            r, bx, by = st
+            while _srs_fits(board, piece, (r, bx, by + 1)): by += 1
+            cells = tuple(sorted(cells_of((r, bx, by))))
+            if cells not in seen: seen.add(cells); out.append(_as_placement(piece, cells, slide=False))
+        visited, q = set(top), deque(top)
+        while q:                                           # everything reachable with drops, moves and rotations
+            st = q.popleft()
+            if not _srs_fits(board, piece, (st[0], st[1], st[2] + 1)):
+                cells = tuple(sorted(cells_of(st)))
+                if cells not in seen: seen.add(cells); out.append(_as_placement(piece, cells, slide=True))
+            for nxt in _srs_moves(board, piece, st):
+                if nxt not in visited: visited.add(nxt); q.append(nxt)
+        return out
+
+    def _placements_v1(self, piece, board) -> list[Placement]:
+        """Rules 1 (generations 0-11): pieces enter from above any column; simplified rotation with a one-column kick."""
         rots = ROTATIONS[piece]
         out, seen = [], set()
         starts = []

@@ -120,6 +120,7 @@ class Episode:
     pieces: int = 0
     died: bool = False
     moves: list[dict] = field(default_factory=list)   # for replays: key, top probabilities, latency
+    rules: int = 2
 
 
 DANGER_HEIGHT = 16   # the top 4 rows: stacking into them is penalised, the rest of the height is free (Tetris setups)
@@ -168,7 +169,7 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
-    ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises = game.lines, game.score, game.pieces, game.over, game.tetrises
+    ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
     return ep
 
 
@@ -249,7 +250,7 @@ def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen
                                 (lambda ev, i=i: on_move(i, ev)) if on_move else None))
     if replay_gen is not None:
         replays.save(replay_gen, [{"seed": e.seed, "lines": e.lines, "score": e.score, "pieces": e.pieces, "died": e.died,
-                                   "moves": e.moves} for e in eps])
+                                   "rules": e.rules, "moves": e.moves} for e in eps])
     return {"games": len(eps), "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
             "mean_score": round(statistics.mean(e.score for e in eps), 1),
             "mean_pieces": round(statistics.mean(e.pieces for e in eps), 1), "best_lines": max(e.lines for e in eps),

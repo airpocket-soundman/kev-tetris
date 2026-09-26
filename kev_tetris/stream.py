@@ -290,7 +290,7 @@ def play(hub, seat, gens, a, stop, next_entry, should_yield=lambda: False):
     """One turn. -> result dict; "ended" says why it ended early (yield to training, lost server)."""
     entry = seat.entry
     seed = seat.seed if seat.seed is not None else a.seed if a.seed is not None else random.randrange(1 << 30)
-    game, pol, ended = Game(seed=seed), seat.policy(), None
+    game, pol, ended = Game(seed=seed, rules=seat.replay.get("rules", 1) if seat.replay else 2), seat.policy(), None
     hub.publish("gen", {**gen_info(entry, gens), "mode": seat.mode})
     hub.publish("move", {**game.snapshot(), "post": game.board, "cells": [], "piece": None, "thinking": [],
                          "latency_ms": 0, "left": a.pieces_per_gen, "next_gen": next_entry["gen"] if next_entry else None})

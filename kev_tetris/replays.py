@@ -41,7 +41,7 @@ def load(gen: int) -> list[dict]:
 
 
 class ReplayPolicy:
-    """Plays one recorded game back. Use with Game(seed=game["seed"])."""
+    """Plays one recorded game back. Use with Game(seed=game["seed"], rules=game.get("rules", 1))."""
 
     def __init__(self, game: dict):
         self.moves, self.i = game["moves"], 0
