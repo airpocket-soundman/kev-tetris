@@ -81,7 +81,7 @@
     <p class="lead">ローカルで動く決定モデル Kev にテトリスをプレイさせ、強化学習で上達させる。その過程を X でライブ配信している。このページは、学習計画・報酬設計・成績・実行環境・今後の計画の記録だ。</p>
     <p class="meta">最終更新: <span id="updated">-</span> ・ <span id="current">-</span></p>
     <nav>
-      <a href="#how">仕組み</a><a href="#env">モデルと実行環境</a><a href="#results">成績の推移</a>
+      <a href="#kev">Kev とは</a><a href="#how">仕組み</a><a href="#env">モデルと実行環境</a><a href="#results">成績の推移</a>
       <a href="#reward">報酬の変遷</a><a href="#history">学習計画の変遷</a><a href="#future">今後の計画</a><a href="#speedup">高速化</a>
     </nav>
   </header>
@@ -92,6 +92,21 @@
       <div class="card kpi"><div class="v" id="k2">-</div><div class="l">学習前(第0世代)からの、1ミノあたり得点の伸び</div></div>
       <div class="card kpi"><div class="v" id="k3">-</div><div class="l" id="k3l">1ゲームあたりのテトリス(最多)</div></div>
       <div class="card kpi"><div class="v" id="k4">-</div><div class="l" id="k4l">完了した世代数</div></div>
+    </div>
+  </section>
+
+  <section id="kev">
+    <h2>Kev とは</h2>
+    <p><b>Kev</b> は、Jared Palmer 氏が公開しているオープンソースの<b>決定モデル(decision model)</b>だ。文章を生成する言語モデルとは違い、「状態」と「質問」を受け取って、答えの候補ごとの確率を1回の計算で返す。</p>
+    <div class="card">
+      <p><b>できること</b>: 1つの状態に対して、Yes/No(noul)、選択肢から1つを選ぶ(choice)、段階評価(score)の質問を、まとめて答えられる。確率は較正されていて、「どれくらい自信があるか」も読み取れる。</p>
+      <p><b>中身</b>: Qwen3.5(0.8B / 4B / 9B)や Qwen3.8-27B をベースに、LoRA と、選択肢を指し示す小さな読み出し部(ポインタヘッド)を学習させている。文章を1文字ずつ生成しないので、速くて安い。</p>
+      <p><b>このプロジェクトでの使い方</b>: テトリスの盤面を「状態」に、置き場所の候補を「選択肢」にして、Kev-4B に1手ずつ選ばせている。さらに、Kev に付属する学習スクリプト(<code>kev.train</code>)で、強化学習の結果を Kev 自身に覚えさせている。</p>
+      <p><b>ライセンス</b>: Apache-2.0(ベースの Qwen3.5 も Apache-2.0)。</p>
+    </div>
+    <div class="grid">
+      <div class="card"><b>Kev 本体</b><p><a href="https://github.com/jaredpalmer/kev">github.com/jaredpalmer/kev</a><br><span class="meta">モデル、推論サーバー、学習スクリプト、モデルカード</span></p></div>
+      <div class="card"><b>このプロジェクト(kev-tetris)</b><p><a href="https://github.com/airpocket-soundman/kev-tetris">github.com/airpocket-soundman/kev-tetris</a><br><span class="meta">テトリス本体、Kev 向けインターフェース、強化学習ループ、配信画面、このページ</span></p></div>
     </div>
   </section>
 
@@ -281,7 +296,7 @@
     </ul>
   </section>
 
-  <footer>Kev は jaredpalmer/kev(Apache-2.0)、ベースモデルは Qwen3.5(Apache-2.0)。このページの数値は、実力テストの記録から作成した。</footer>
+  <footer>Kev は <a href="https://github.com/jaredpalmer/kev">jaredpalmer/kev</a>(Apache-2.0)、ベースモデルは Qwen3.5(Apache-2.0)。ソースコードは <a href="https://github.com/airpocket-soundman/kev-tetris">airpocket-soundman/kev-tetris</a>。このページの数値は、実力テストの記録から作成した。</footer>
 </main>
 <script src="data.js"></script>
 <script>
