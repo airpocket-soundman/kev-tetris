@@ -37,6 +37,7 @@ LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 # v4 (Cold Clear style): while the stack is safe, singles and doubles are worth little - build for a Tetris instead
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
+SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
 STATUS = ROOT / "runs" / "rl_status.json"     # written here, read by the control page and the stream screen
 
@@ -146,8 +147,10 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
         r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
         if cleared and b2b >= 2: r += 8.0                  # back-to-back Tetris / T-spin clear
         if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
-        # holes and overhangs cost every move they stay (from gen 17): repair them at once, then build for a Tetris
-        r -= 0.15 * (after["enclosed"] + after["overhang"])
+        # holes and overhangs cost every move they stay (gen 17: 0.15, gen 19: 0.35): repair them at once, then build
+        r -= 0.35 * (after["enclosed"] + after["overhang"])
+        # above half the board: survive first - lowering the stack pays (from gen 19)
+        if before["max_height"] > SURVIVE_HEIGHT: r += 0.6 * max(0, before["max_height"] - after["max_height"])
     else:
         r = LINE_REWARD[cleared] + 0.05
     r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
@@ -166,6 +169,8 @@ def potential(f: dict) -> float:
         - 0.5 * max(0, f["max_height"] - danger_height())
     if REWARD_VERSION == "v4":   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
         phi -= 0.1 * f["row_transitions"] + 0.1 * f["col_transitions"] + 0.2 * f["hole_depth"] + 0.5 * f["hole_rows"]
+        phi -= 0.5 * f["overhang"]                                            # overhangs weigh -1.0 in all (gen 19)
+        phi -= 0.08 * max(0, f["max_height"] - SURVIVE_HEIGHT) ** 2           # "survive first" above half the board
         # one well for the I piece; every other well is a liability that grows fast with its depth (gen 18: two-well towers)
         phi -= 0.15 * f["extra_wells"]
     return phi
