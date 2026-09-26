@@ -264,6 +264,17 @@
       <div class="card"><b>6. ホールド機能(要相談)</b><p>ミノを1つ取っておける、本来のテトリスの機能。戦略の幅は広がるが、ルールが変わるので過去の世代とは比べにくくなる。</p></div>
     </div>
 
+    <h3>過去の事例から v4 に取り入れること</h3>
+    <div class="tablewrap"><table>
+      <tr><th>事例</th><th>効いたもの</th><th>v4 での使い方</th></tr>
+      <tr><td>Dellacherie / BCTS</td><td>穴、置いた高さ、行遷移・列遷移、井戸の合計、浸食セル、穴の深さ、穴のある行数</td><td>盤面の良さ(ポテンシャル)と、手の評価の基準に使う</td></tr>
+      <tr><td>CBMPI(NeurIPS 2013)</td><td>数手先まで試しに打つ方策改善。いろいろな高さの盤面から学ぶと強い</td><td>2手の先読み探索、練習問題を中〜高い盤面にも広げる</td></tr>
+      <tr><td>DQN の実装例</td><td>報酬 = 1 + 10 × (ライン数)²。まとめ消しを強く優遇</td><td>4列消しの大きな報酬を維持</td></tr>
+      <tr><td>Cold Clear</td><td>安全な間は1列・2列消しを減点、4列消し・T-スピン・連続テトリスを加点</td><td>高さで変わる消し方の評価、連続テトリスに +8、T-スピンに加点</td></tr>
+      <tr><td>報酬の整形の理論</td><td>盤面の良さの差分だけを足すと、最適な方策を変えない</td><td>整形はポテンシャル型に限る</td></tr>
+    </table></div>
+    <p class="meta">参考: <a href="https://arxiv.org/abs/1905.01652">The Game of Tetris in Machine Learning</a> / <a href="https://papers.nips.cc/paper/5190-approximate-dynamic-programming-finally-performs-well-in-the-game-of-tetris.pdf">CBMPI</a> / <a href="https://github.com/nuno-faria/tetris-ai">nuno-faria/tetris-ai</a> / <a href="https://github.com/MinusKelvin/cold-clear">Cold Clear</a></p>
+
     <h3>0.8B への蒸留</h3>
     <p>v3 の世代が「500手まで5ゲーム中4以上生き残る」「1ラインあたり140点以上」「テトリスが毎ゲーム数回」を満たしたら、その世代を先生にして Kev-0.8B に蒸留する。そのあとは 0.8B で、CUDA グラフと複数ゲームの同時進行を使って世代を速く回す。成績が 4B に届かない場合は 4B を使い続ける。</p>
 
