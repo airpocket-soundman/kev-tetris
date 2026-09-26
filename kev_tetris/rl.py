@@ -16,7 +16,8 @@ starts kev.serve for collection and evaluation and stops it before training.
 """
 from __future__ import annotations
 
-import json, os, random, shutil, socket, statistics, subprocess, sys, time
+import json, os, random, shutil, socket, statistics, subprocess, sys, threading, time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -76,9 +77,13 @@ class Control:
 
     def __init__(self):
         self.status = {"state": "running", "phase": "", "gen": None, "detail": "", "progress": None}
+        self.lock = threading.RLock()   # games run in parallel threads and all report here
         self.last = 0.0
 
     def report(self, force: bool = False, **kw):
+        with self.lock: self._report(force, **kw)
+
+    def _report(self, force: bool = False, **kw):
         self.status.update(kw)
         if force or time.time() - self.last > 1.0:
             self.last = time.time()
@@ -270,12 +275,47 @@ def select_records(steps: list[Step], keep_frac: float) -> list[dict]:
     return [s.record for s in pos[:max(1, int(len(steps) * keep_frac))]]
 
 
-def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen: int | None = None, on_move=None) -> dict:
-    """Greedy games on fixed seeds. With replay_gen the games are saved for the stream screen (kev_tetris.replays)."""
-    eps = []
-    for i, s in enumerate(seeds):
-        eps.append(play_episode(policy, s, max_pieces, (lambda game, d, i=i: on_step(i, game)) if on_step else None,
-                                (lambda ev, i=i: on_move(i, ev)) if on_move else None))
+def run_games(n_parallel: int, jobs: list) -> list:
+    """Run play_episode jobs (zero-argument callables) n at a time, in order. While Kev computes on the GPU for one game,
+    the others do their CPU work (search, features, requests); with CUDA graphs kev.serve also batches their requests.
+    A stop request reaches every game through Control.checkpoint, so the first exception is re-raised."""
+    if n_parallel <= 1: return [job() for job in jobs]
+    with ThreadPoolExecutor(n_parallel) as ex:
+        return [f.result() for f in [ex.submit(job) for job in jobs]]
+
+
+class Showcase:
+    """Which of the parallel games the stream screen follows: the lowest-numbered one still playing."""
+    def __init__(self):
+        self.lock, self.running = threading.Lock(), set()
+
+    def start(self, i):
+        with self.lock: self.running.add(i)
+
+    def end(self, i):
+        with self.lock: self.running.discard(i)
+
+    def shown(self, i) -> bool:
+        with self.lock: return bool(self.running) and i == min(self.running)
+
+
+def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen: int | None = None, on_move=None,
+             parallel: int = 1) -> dict:
+    """Greedy games on fixed seeds. With replay_gen the games are saved for the stream screen (kev_tetris.replays).
+    policy: a policy, or a zero-argument factory giving one per game (needed when games run in parallel)."""
+    show = Showcase()
+    make = policy if callable(policy) and not hasattr(policy, "decide") else (lambda: policy)
+
+    def job(i, s):
+        def run():
+            show.start(i)
+            try:
+                return play_episode(make(), s, max_pieces, (lambda game, d: on_step(i, game)) if on_step else None,
+                                    (lambda ev: on_move(i, ev) if show.shown(i) else None) if on_move else None)
+            finally:
+                show.end(i)
+        return run
+    eps = run_games(parallel, [job(i, s) for i, s in enumerate(seeds)])
     if replay_gen is not None:
         replays.save(replay_gen, [{"seed": e.seed, "lines": e.lines, "score": e.score, "pieces": e.pieces, "died": e.died,
                                    "rules": e.rules, "moves": e.moves} for e in eps])
@@ -391,10 +431,12 @@ def run_loop(a, ctl: Control):
     feed = live.Feed()   # every move played here also goes to the stream screen
 
     def tester(gen):
+        pieces_now = {}
         def on_step(i, game):
             ctl.checkpoint()
-            ctl.report(detail=f"テスト {i + 1}/{a.eval_games} ゲーム目・{game.lines}ライン",
-                       progress=min(1.0, (i + game.pieces / a.eval_max_pieces) / a.eval_games))
+            pieces_now[i] = game.pieces if not game.over else a.eval_max_pieces
+            ctl.report(detail=f"テスト {a.eval_games}ゲーム・{a.parallel}ゲーム同時",
+                       progress=min(1.0, sum(min(1.0, p / a.eval_max_pieces) for p in pieces_now.values()) / a.eval_games))
         return on_step
 
     def test_feed(gen):
@@ -406,7 +448,8 @@ def run_loop(a, ctl: Control):
         ctl.report(force=True, phase="test", gen=0, detail=f"{start} を読み込み中", progress=0.0)
         print(f"[gen 0] evaluating {start}", flush=True)
         with serving(start) as srv:
-            ev = evaluate(policy(srv, 0), eval_seeds, a.eval_max_pieces, tester(0), None if a.demo else 0, test_feed(0))
+            ev = evaluate(lambda: policy(srv, 0), eval_seeds, a.eval_max_pieces, tester(0), None if a.demo else 0, test_feed(0),
+                          parallel=a.parallel)
         entry = {"gen": 0, "run": start, "parent": None, "model": a.model_name, "train": None, "eval": ev}
         demo_gens.append(entry) if a.demo else generations.upsert(entry)
         ctl.report(force=True, last_eval={"gen": 0, **ev})
@@ -429,21 +472,35 @@ def run_loop(a, ctl: Control):
 
         ctl.report(force=True, phase="collect", gen=g, detail=f"第{prev['gen']}世代 を読み込み中", progress=0.0)
         print(f"[gen {g}] collecting {a.episodes} episodes with gen {prev['gen']} (T={a.temperature})", flush=True)
-        eps = []
         with serving(prev["run"]) as srv:
-            pol = policy(srv, prev["gen"], a.temperature)
-            for i in range(a.episodes):
-                def on_step(game, d, i=i):
+            show, pieces_now, done = Showcase(), {}, []
+            search = (lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
+                                                            potential, a.teacher_first_k)) if a.teacher and not a.demo else None
+
+            def practice_job(i, seed, drill, pol):
+                def on_step(game, d):
                     ctl.checkpoint()
-                    ctl.report(detail=f"練習試合 {i + 1}/{a.episodes} ゲーム目・{game.pieces}手",
-                               progress=min(1.0, (i + game.pieces / a.max_pieces) / a.episodes))
-                def on_move(ev, i=i):
-                    feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
-                                  "max_pieces": a.max_pieces, "training_gen": g}, ev)
+                    pieces_now[i] = game.pieces
+                    ctl.report(detail=f"練習試合 {len(done)}/{a.episodes} ゲーム完了・{a.parallel}ゲーム同時",
+                               progress=min(1.0, sum(min(1.0, p / a.max_pieces) for p in pieces_now.values()) / a.episodes))
+                def on_move(ev):
+                    if show.shown(i):
+                        feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
+                                      "max_pieces": a.max_pieces, "training_gen": g}, ev)
+                def run():
+                    show.start(i)
+                    try:
+                        ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search)
+                    finally:
+                        show.end(i)
+                    done.append(i); pieces_now[i] = a.max_pieces
+                    return ep
+                return run
+            jobs = []
+            for i in range(a.episodes):   # seeds, drills and policies drawn here, in order: runs stay reproducible
                 drill = make_drill(rng) if a.drill_frac and rng.random() < a.drill_frac else None
-                search = (lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
-                                                                potential, a.teacher_first_k)) if a.teacher and not a.demo else None
-                eps.append(play_episode(pol, rng.randrange(1 << 30), a.max_pieces, on_step, on_move, board=drill, search=search))
+                jobs.append(practice_job(i, rng.randrange(1 << 30), drill, policy(srv, prev["gen"], a.temperature)))
+            eps = run_games(a.parallel, jobs)
         steps = assign_window_advantages(eps, a.window)
         if a.teacher and not a.demo:
             # expert iteration: the search's moves on the positions Kev reached, disagreements first (they teach most)
@@ -491,7 +548,8 @@ def run_loop(a, ctl: Control):
         run = f"demo:{g}" if a.demo else str(out.relative_to(ROOT)).replace("\\", "/")
         ctl.report(force=True, phase="test", detail=f"第{g}世代 を読み込み中", progress=0.0)
         with serving(run) as srv:
-            ev = evaluate(policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g))
+            ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g),
+                          parallel=a.parallel)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
                  "rules": RULES, "teacher": bool(a.teacher),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
@@ -521,6 +579,7 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
+    ap.add_argument("--parallel", type=int, default=8, help="games played at the same time (practice and tests)")
     ap.add_argument("--teacher", type=int, choices=[0, 1], default=1, help="train on a two-piece lookahead search's moves (v4 part 2)")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
