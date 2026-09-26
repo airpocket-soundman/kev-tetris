@@ -459,7 +459,7 @@ def run_loop(a, ctl: Control):
         # elite games: the moves that went well in the practice games with the best score per piece are kept across
         # generations (capped) and trained on again (self-imitation)
         elite = data_dir / f"elite-{REWARD_VERSION}.jsonl"
-        if a.elite_games and not a.demo:
+        if a.elite_games and not a.demo and not a.teacher:   # the teacher's labels replace the elite set
             best = sorted((e for e in eps if e.pieces >= 50), key=lambda e: e.score / e.pieces, reverse=True)[:a.elite_games]
             keep = {id(s) for e in best for s in e.steps}
             new = [json.dumps(s.record, ensure_ascii=False) for s in steps
@@ -467,9 +467,11 @@ def run_loop(a, ctl: Control):
             old = elite.read_text(encoding="utf-8").splitlines() if elite.exists() else []
             elite.write_text("\n".join((old + new)[-a.elite_cap:]) + "\n" if old or new else "", encoding="utf-8")
         merged = data_dir / f"train-{g:03d}.jsonl"
-        same = sorted(x["gen"] for x in gens if x.get("reward", "v1") == REWARD_VERSION)[-a.buffer_gens:] if a.buffer_gens else []
+        # replay buffer: records of the latest generations made the same way (same reward version, teacher or not)
+        same = sorted(x["gen"] for x in gens if x.get("reward", "v1") == REWARD_VERSION
+                      and bool(x.get("teacher")) == bool(a.teacher))[-a.buffer_gens:] if a.buffer_gens else []
         parts = [data_dir / f"gen-{k:03d}.jsonl" for k in same + [g]]   # only records chosen under this reward
-        if a.elite_games and elite.exists(): parts.append(elite)
+        if a.elite_games and not a.teacher and elite.exists(): parts.append(elite)
         merged.write_text("".join(p.read_text(encoding="utf-8") for p in parts if p.exists()), encoding="utf-8")
         n_merged = sum(1 for _ in merged.open(encoding="utf-8"))
         print(f"[gen {g}] {len(recs)} records from {sum(len(e.steps) for e in eps)} decisions; training on {n_merged}", flush=True)
@@ -489,7 +491,7 @@ def run_loop(a, ctl: Control):
         with serving(run) as srv:
             ev = evaluate(policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g))
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
-                 "rules": RULES,
+                 "rules": RULES, "teacher": bool(a.teacher),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
                            "minutes": round((time.time() - t0) / 60, 1)},
@@ -525,7 +527,7 @@ def main(argv=None):
     ap.add_argument("--gamma", type=float, default=0.97)
     ap.add_argument("--branch_from", type=int, default=None, help="start the current reward version from this generation (used until one of its generations exists)")
     ap.add_argument("--keep_frac", type=float, default=0.35, help="fraction of decisions kept as training records (top positive advantage)")
-    ap.add_argument("--buffer_gens", type=int, default=2, help="also train on the records of this many previous generations")
+    ap.add_argument("--buffer_gens", type=int, default=1, help="also train on the records of this many previous generations")
     ap.add_argument("--eval_games", type=int, default=10, help="test games (10 since v4: per-piece results are compared, less noise)")
     ap.add_argument("--eval_max_pieces", type=int, default=500, help="test games stop here, so a strong generation still finishes; generations are compared by mean score")
     ap.add_argument("--epochs", type=int, default=1)
