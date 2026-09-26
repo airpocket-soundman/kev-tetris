@@ -27,7 +27,7 @@ import numpy as np
 from . import generations, kevenv, live, proc, replays, teacher
 from .interface import VALUE_QUESTION, to_record, to_value_request
 from .policy import KevPolicy, KevServer
-from .search import KevSearchPolicy
+from .search import KevSearchPolicy, rollout_label
 from .tetris import RULES, Game, board_features
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -121,6 +121,7 @@ class Step:
     teacher_record: dict | None = None   # the same position labelled with the lookahead search's move
     agrees: bool = True                  # the search picked the move that was played
     value_request: dict | None = None    # "how good is this board" on this position, next piece unknown (RL)
+    source: str | None = None            # where the label came from when not the teacher, e.g. "rollout"
 
 
 @dataclass
@@ -196,11 +197,12 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         placements = game.placements()
         d = policy.decide(game)
         rec = to_record(game, placements, d.placement.key)
-        t_rec, agrees = None, True
+        t_rec, agrees, source = None, True, None
         vreq = {k: v for k, v in to_value_request(game).items() if k != "model"} if values else None
         own = getattr(d, "label", None)
         if search or own:   # the teacher's move for this position (expert iteration): same request, another label
-            key = search(game, placements) if search else own
+            key = search(game, placements, d) if search else own
+            if isinstance(key, tuple): key, source = key
             agrees = key == d.placement.key
             t_rec = rec if agrees else {**rec, "questions": {"move": {**rec["questions"]["move"], "label": key}}}
         before = board_features(game.board)
@@ -211,7 +213,7 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b), value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0,
-                             teacher_record=t_rec, agrees=agrees, value_request=vreq))
+                             teacher_record=t_rec, agrees=agrees, value_request=vreq, source=source))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
@@ -481,6 +483,7 @@ def run_loop(a, ctl: Control):
 
     feed = live.Feed()   # every move played here also goes to the stream screen
     collapsed: set[int] = set()
+    rng_ro = random.Random(a.seed + 7 if hasattr(a, "seed") and a.seed is not None else None)
 
     def distill(g, gens):
         """Distillation into a new model (e.g. Kev-0.8B). The best generation so far (same rules) plays practice games,
@@ -491,7 +494,7 @@ def run_loop(a, ctl: Control):
         t0 = time.time()
         ctl.report(force=True, phase="collect", gen=g, detail=f"蒸留: 第{src['gen']}世代({model_of(src)})を読み込み中", progress=0.0)
         print(f"[gen {g}] distilling {model_of(src)} gen {src['gen']} into {a.model_name}", flush=True)
-        search = lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
+        search = lambda game, ps, d=None: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
                                                        potential, a.teacher_first_k)
         show, done = Showcase(), []
         with serving(src["run"], other_model=True) as srv:
@@ -594,8 +597,19 @@ def run_loop(a, ctl: Control):
         print(f"[gen {g}] collecting {a.episodes} episodes with gen {prev['gen']} (T={a.temperature})", flush=True)
         with serving(prev["run"]) as srv:
             show, pieces_now, done = Showcase(), {}, []
-            search = (lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
-                                                            potential, a.teacher_first_k)) if (a.teacher or rl) and not a.demo and not rl_means else None
+            hand = lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
+                                                         potential, a.teacher_first_k)
+            ro = {"n": 0, "same": 0}
+
+            def search(game, ps, d=None):
+                # RL: on a share of the positions Kev's own rollouts pick the label (beyond the teacher); elsewhere the teacher
+                if rl and a.rollout_rate and d is not None and rng_ro.random() < a.rollout_rate:
+                    key, _ = rollout_label(game, ps, d.probs, srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), potential,
+                                           a.rollout_k, a.rollout_depth, a.rollout_n, a.gamma, random.Random(rng_ro.random()))
+                    ro["n"] += 1; ro["same"] += key == hand(game, ps)
+                    return key, "rollout"
+                return hand(game, ps)
+            if not ((a.teacher or rl) and not a.demo and not rl_means): search = None
 
             def practice_job(i, seed, drill, pol):
                 def on_step(game, d):
@@ -632,13 +646,16 @@ def run_loop(a, ctl: Control):
             # first; plus value labels from the returns the games actually produced
             fits = lambda r: r and len(json.dumps(r)) <= MAX_RECORD_CHARS
             pool = [s for e in eps for s in e.steps if fits(s.teacher_record)]
-            diff = [s.teacher_record for s in pool if not s.agrees]; same = [s.teacher_record for s in pool if s.agrees]
+            rolled = [s.teacher_record for s in pool if s.source == "rollout"]
+            diff = [s.teacher_record for s in pool if not s.agrees and not s.source]
+            same = [s.teacher_record for s in pool if s.agrees and not s.source]
             rng.shuffle(diff); rng.shuffle(same)
+            if ro["n"]: print(f"[gen {g}] rollouts: {ro['n']} positions, same as the teacher {ro['same']}", flush=True)
             vrecs, means = value_records(eps, a.gamma)
             vrecs = [r for r in vrecs if fits(r)]; rng.shuffle(vrecs)
             # moves filled up to teacher_cap with agreements: with Kev's own search few moves differ (gen 29: 129), and
             # a set of mostly value records (279 moves vs 1200 values) let the move answers drift - 207 pieces in the test
-            moves = (diff + same)[:a.teacher_cap]
+            moves = (rolled + diff + same)[:max(a.teacher_cap, len(rolled))]
             recs = moves + vrecs[:min(a.value_cap, len(moves))]
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
@@ -735,6 +752,10 @@ def main(argv=None):
     ap.add_argument("--search_k", type=int, default=4, help="RL: Kev's likeliest moves the lookahead judges")
     ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
+    ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
+    ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
+    ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
+    ap.add_argument("--rollout_n", type=int, default=2, help="RL: rollouts per move")
     ap.add_argument("--value_cap", type=int, default=600, help="RL: value records per generation")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")

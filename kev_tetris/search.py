@@ -71,3 +71,36 @@ class KevSearchPolicy:
         d = Decision(chosen, probs, resp.get("latency_ms", (time.perf_counter() - t0) * 1000))
         d.label, d.kev_choice = best.key, kev_choice.key           # train towards the search's choice
         return d
+
+
+def rollout_label(game: Game, placements, probs: dict, base_url: str, reward, potential, k: int = 3, depth: int = 10,
+                  n: int = 2, gamma: float = 0.97, rng: random.Random | None = None, timeout: float = 300):
+    """Kev's own play decides (rollout policy improvement): each of Kev's k likeliest moves is played, then Kev plays on
+    by itself (its first choice) for `depth` pieces, n times; a move's worth is the mean discounted reward along the way
+    + the hand potential of the board at the end (a lost game: the rewards only). The best move is the label.
+    Unseen pieces stay unseen: each rollout reshuffles what is left of the 7-bag and draws after it with its own seed.
+    -> (best key, {key: worth})."""
+    from .policy import KevPolicy
+    rng = rng or random.Random()
+    pol = KevPolicy(base_url, temperature=0.0, timeout=timeout)
+    top = sorted(placements, key=lambda p: probs.get(p.key, 0.0), reverse=True)[:k]
+    seeds = [[rng.randrange(1 << 30) for _ in range(n)] for _ in top]
+
+    def one(p, seed):
+        g = copy.deepcopy(game)
+        g.rng = random.Random(seed); g.rng.shuffle(g.bag)
+        total, disc, move = 0.0, 1.0, p
+        for _ in range(depth + 1):
+            before = board_features(g.board)
+            cleared = g.step(move)
+            after = board_features(g.board)
+            total += disc * reward(before, after, cleared, g.over); disc *= gamma
+            if g.over: return total
+            if disc < gamma ** (depth + 1) + 1e-12: break
+            move = pol.decide(g).placement
+        return total + disc * potential(board_features(g.board))
+
+    jobs = [(p, s) for p, ss in zip(top, seeds) for s in ss]
+    with ThreadPoolExecutor(len(jobs)) as ex: vals = list(ex.map(lambda j: one(*j), jobs))
+    worth = {p.key: sum(vals[i * n:(i + 1) * n]) / n for i, p in enumerate(top)}
+    return max(worth, key=worth.get), worth
