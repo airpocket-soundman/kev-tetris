@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from .tetris import HEIGHT, WIDTH, Game, Placement, board_features
 
-INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to drop the current piece. A Tetris (4 lines at "
-                "once) scores far more than single lines: stack flat without holes, keep one column open as a deep well, "
-                "and fill it with an I piece. Holes are bad, and a stack reaching the top loses the game.")
+INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to place the current piece. A Tetris (4 lines "
+                "at once) scores far more than single lines: stack flat, keep one column open as a deep well, and fill it "
+                "with an I piece. Enclosed holes are very bad; overhangs can still be filled by sliding a piece under them. "
+                "Stay clear of the top rows: a stack reaching the top loses the game.")
 
 
 def board_text(board, margin: int = 2) -> str:
@@ -39,8 +40,10 @@ def option_text(game: Game, p: Placement) -> str:
     f = game.features(p)
     cols = sorted({x for x, _ in p.cells})
     span = f"col {cols[0]}" if len(cols) == 1 else f"cols {cols[0]}-{cols[-1]}"
-    return (f"rot {p.rotation}, {span}: clears {f.lines}, holes {f.holes} ({f.new_holes:+d}), "
-            f"max height {f.max_height}, bumpiness {f.bumpiness}, deepest well {f.max_well}")
+    how = ", slide" if p.slide else ""
+    return (f"rot {p.rotation}, {span}{how}: clears {f.lines}, holes {f.enclosed} ({f.new_enclosed:+d}), "
+            f"overhangs {f.overhang} ({f.new_overhang:+d}), height {f.max_height}, bumps {f.bumpiness}, "
+            f"well {f.max_well}, ready {f.ready_rows}")
 
 
 def to_request(game: Game, placements: list[Placement] | None = None, model: str = "kev-latest") -> dict:

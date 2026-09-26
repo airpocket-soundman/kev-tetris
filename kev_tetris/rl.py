@@ -31,7 +31,7 @@ from .tetris import Game, board_features
 ROOT = Path(__file__).resolve().parent.parent
 # reward "v2": a Tetris is worth twice the game's own ratio (1/3/5/8), and stack height is not penalised: building for
 # a Tetris means stacking high on purpose. Records from different reward versions are never trained on together.
-REWARD_VERSION = "v2"
+REWARD_VERSION = "v3"   # v3: hole/overhang split with a bonus for resolving, danger zone, 10-move window credit (docs/plan.md 5)
 LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
 STATUS = ROOT / "runs" / "rl_status.json"     # written here, read by the control page and the stream screen
@@ -104,6 +104,10 @@ class Step:
     feats: list[float]      # board features before the move, for the value baseline
     ret: float = 0.0
     adv: float = 0.0
+    phi_before: float = 0.0
+    phi_after: float = 0.0
+    tetris: bool = False
+    new_enclosed: int = 0
 
 
 @dataclass
@@ -118,20 +122,38 @@ class Episode:
     moves: list[dict] = field(default_factory=list)   # for replays: key, top probabilities, latency
 
 
+DANGER_HEIGHT = 16   # the top 4 rows: stacking into them is penalised, the rest of the height is free (Tetris setups)
+
+
 def shaped_reward(before: dict, after: dict, cleared: int, died: bool) -> float:
     r = LINE_REWARD[cleared] + 0.05
-    r -= 0.4 * max(0, after["holes"] - before["holes"])
+    r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
+    r -= 0.5 * max(0, after["overhang"] - before["overhang"])     # a covered cell a slide can still fill
+    # resolved: filled by a slide, or uncovered because the rows above cleared. Less than the penalty, so creating a
+    # hole and filling it again never pays
+    r += 0.8 * max(0, (before["enclosed"] + before["overhang"]) - (after["enclosed"] + after["overhang"]))
+    r -= 0.5 * max(0, after["max_height"] - DANGER_HEIGHT)
     if died: r -= 10.0
     return r
 
 
+def potential(f: dict) -> float:
+    """How good a board is, for the window credit: few holes, rows ready for a Tetris, a well (capped at 4 deep)."""
+    return -1.0 * f["enclosed"] - 0.5 * f["overhang"] + 0.3 * f["ready_rows"] + 0.2 * min(f["max_well"], 4) \
+        - 0.5 * max(0, f["max_height"] - DANGER_HEIGHT)
+
+
 def value_features(f: dict) -> list[float]:
-    return [1.0, f["holes"], f["max_height"], f["agg_height"] / 10, f["bumpiness"], f["wells"]]
+    return [1.0, f["enclosed"], f["overhang"], f["max_height"], f["agg_height"] / 10, f["bumpiness"], f["wells"],
+            f["ready_rows"], min(f["max_well"], 4)]
 
 
-def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None) -> Episode:
-    """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it."""
+def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None) -> Episode:
+    """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it.
+    board: a starting board (a Tetris drill) instead of an empty one."""
     game, ep = Game(seed=seed), Episode(seed)
+    if board is not None:
+        game.board = [row[:] for row in board]
     while not game.over and game.pieces < max_pieces:
         placements = game.placements()
         d = policy.decide(game)
@@ -141,11 +163,27 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None)
         cleared = game.step(d.placement)
         if on_move: on_move(live.move_event(game, pre, placements, d, piece))
         after = board_features(game.board)
-        ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over), value_features(before)))
+        ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over), value_features(before),
+                             phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
+                             new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises = game.lines, game.score, game.pieces, game.over, game.tetrises
     return ep
+
+
+def make_drill(rng: random.Random):
+    """A Tetris drill: 2-6 bottom rows full except one well column, under a ragged partial row; no holes."""
+    from .tetris import HEIGHT, WIDTH
+    b = [[0] * WIDTH for _ in range(HEIGHT)]
+    well, rows = rng.randrange(WIDTH), rng.randint(2, 6)
+    for y in range(HEIGHT - rows, HEIGHT):
+        for x in range(WIDTH):
+            if x != well: b[y][x] = rng.randint(1, 7)
+    top = HEIGHT - rows - 1
+    for x in range(WIDTH):
+        if x != well and rng.random() < 0.5: b[top][x] = rng.randint(1, 7)
+    return b
 
 
 def assign_advantages(episodes: list[Episode], gamma: float = 0.97, truncate_tail: int = 60) -> list[Step]:
@@ -165,8 +203,41 @@ def assign_advantages(episodes: list[Episode], gamma: float = 0.97, truncate_tai
     return usable
 
 
+def assign_window_advantages(episodes: list[Episode], window: int = 10, tetris_bonus: float = 1.5) -> list[Step]:
+    """v3 credit: each move ends a window of the `window` moves up to it (sliding by one). A window's value is the
+    rewards inside it plus the change in board potential over it; a least-squares baseline on the board at its start
+    gives the window's advantage (x tetris_bonus when positive and it holds a Tetris). A move's advantage is the mean
+    over the windows that contain it, so setup moves share the credit of the Tetris they lead to."""
+    rows = []   # (episode steps, start index, end index, value)
+    for ep in episodes:
+        st = ep.steps
+        for t in range(len(st)):
+            s0 = max(0, t - window + 1)
+            v = sum(x.reward for x in st[s0:t + 1]) + st[t].phi_after - st[s0].phi_before
+            rows.append((st, s0, t, v))
+    if not rows: return []
+    X = np.array([r[0][r[1]].feats for r in rows]); y = np.array([r[3] for r in rows])
+    w, *_ = np.linalg.lstsq(X, y, rcond=None)
+    sums: dict[int, list] = {}
+    for (st, s0, t, v), base in zip(rows, X @ w):
+        adv = float(v - base)
+        if adv > 0 and any(x.tetris for x in st[s0:t + 1]): adv *= tetris_bonus
+        for x in st[s0:t + 1]:
+            acc = sums.setdefault(id(x), [x, 0.0, 0]); acc[1] += adv; acc[2] += 1
+    out = []
+    for x, total, n in sums.values():
+        x.adv = total / n; out.append(x)
+    return out
+
+
+MAX_RECORD_CHARS = 5200   # ~2.2 chars per token: keeps a record inside kev.train's context at --max_state 2048
+
+
 def select_records(steps: list[Step], keep_frac: float) -> list[dict]:
-    pos = sorted((s for s in steps if s.adv > 0), key=lambda s: s.adv, reverse=True)
+    # a move that sealed a hole is never imitated, whatever the window around it earned (v3)
+    # records too long for the training context are left out (kev.train stops on them instead of skipping)
+    pos = sorted((s for s in steps if s.adv > 0 and s.new_enclosed <= 0 and len(json.dumps(s.record)) <= MAX_RECORD_CHARS),
+                 key=lambda s: s.adv, reverse=True)
     return [s.record for s in pos[:max(1, int(len(steps) * keep_frac))]]
 
 
@@ -279,7 +350,10 @@ def run_loop(a, ctl: Control):
         if a.demo:
             from .stream import NoisyHeuristic
             return NoisyHeuristic(max(0.0, 0.6 - 0.12 * gen), rng.randrange(1 << 30))
-        return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30))
+        # practice: sample only among moves that seal no hole while there are any (5% of moves unrestricted)
+        allow = (lambda game, ps: None if rng.random() < a.hole_free_eps else
+                 [p for p in ps if game.features(p).new_enclosed <= 0]) if temperature > 0 else None
+        return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow)
 
     feed = live.Feed()   # every move played here also goes to the stream screen
 
@@ -309,8 +383,13 @@ def run_loop(a, ctl: Control):
         gens = load()
         g = max(x["gen"] for x in gens) + 1
         # --branch_from starts a new line from an older generation; after that the latest one is the parent
-        prev = next(x for x in gens if x["gen"] == a.branch_from) if a.branch_from is not None and \
-            not any(x.get("reward") == REWARD_VERSION for x in gens) else max(gens, key=lambda x: x["gen"])
+        # parent: the best tested generation among the latest few of this reward version; the first one of a version
+        # starts from the best generation so far (or --branch_from)
+        mine = [x for x in gens if x.get("reward") == REWARD_VERSION and x.get("eval")]
+        if mine: pool = mine[-a.parent_window:]
+        elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
+        else: pool = [x for x in gens if x.get("eval")]
+        prev = max(pool, key=lambda x: x["eval"]["mean_score"])
         if a.generations and g > a.generations: break   # 0 = until stopped
         t0 = time.time()
 
@@ -327,8 +406,9 @@ def run_loop(a, ctl: Control):
                 def on_move(ev, i=i):
                     feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
                                   "max_pieces": a.max_pieces, "training_gen": g}, ev)
-                eps.append(play_episode(pol, rng.randrange(1 << 30), a.max_pieces, on_step, on_move))
-        steps = assign_advantages(eps, a.gamma)
+                drill = make_drill(rng) if a.drill_frac and rng.random() < a.drill_frac else None
+                eps.append(play_episode(pol, rng.randrange(1 << 30), a.max_pieces, on_step, on_move, board=drill))
+        steps = assign_window_advantages(eps, a.window)
         recs = select_records(steps, a.keep_frac)
         data = data_dir / f"gen-{g:03d}.jsonl"
         data.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs), encoding="utf-8")
@@ -374,8 +454,12 @@ def main(argv=None):
     ap.add_argument("--need_train_gb", type=float, default=13.0, help="free GPU memory to wait for before kev.train (0 = do not check; ~6 for Kev-0.8B)")
     ap.add_argument("--generations", type=int, default=10, help="train until this generation exists (0 = keep going until stopped)")
     ap.add_argument("--episodes", type=int, default=16)
-    ap.add_argument("--max_pieces", type=int, default=200, help="per collection episode")
-    ap.add_argument("--temperature", type=float, default=1.0)
+    ap.add_argument("--max_pieces", type=int, default=400, help="per collection episode (long enough to also meet deaths)")
+    ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--hole_free_eps", type=float, default=0.05, help="practice: share of moves sampled without the no-new-hole restriction")
+    ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
+    ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
+    ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
     ap.add_argument("--gamma", type=float, default=0.97)
     ap.add_argument("--branch_from", type=int, default=None, help="start the current reward version from this generation (used until one of its generations exists)")
     ap.add_argument("--keep_frac", type=float, default=0.35, help="fraction of decisions kept as training records (top positive advantage)")
@@ -385,7 +469,7 @@ def main(argv=None):
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=5e-5)
     ap.add_argument("--accum", type=int, default=8)
-    ap.add_argument("--max_state", type=int, default=1536, help="training context; v2 prompts need more than 1024 (branch limit grows with it)")
+    ap.add_argument("--max_state", type=int, default=2048, help="training context; v3 prompts (slides, more features) need more than v2's 1536")
     ap.add_argument("--replay", type=int, default=0, help="mix in N records of --replay_suite so general skill is not forgotten")
     ap.add_argument("--replay_suite", default="evals/v7/decision-v7")
     ap.add_argument("--port", type=int, default=8019, help="the training loop's own Kev server (8009 = the manual one, 8011/8012 = the stream screen)")

@@ -1,4 +1,8 @@
-"""Tetris engine built around whole-piece placements (rotation + column, then hard drop).
+"""Tetris engine built around whole-piece placements.
+
+Placements are every resting place the piece can reach from above by moving left/right, rotating (with a one-column
+kick) and dropping one row at a time, so slides and tucks under overhangs are included. A placement reachable by a
+plain hard drop keeps its short key r{rotation}x{column}; the others are keyed r{rotation}x{column}y{row}.
 
 A decision model does not steer a falling piece key by key: every turn it gets the list of legal final placements of the
 current piece and picks one. That is how most Tetris AIs are framed, and it maps directly onto a Kev Choice question.
@@ -6,6 +10,7 @@ current piece and picks one. That is how most Tetris AIs are framed, and it maps
 from __future__ import annotations
 
 import random
+from collections import deque
 from dataclasses import dataclass, field
 
 WIDTH, HEIGHT = 10, 20
@@ -47,10 +52,11 @@ class Placement:
     x: int                      # left column of the piece
     y: int                      # top row of the piece after the drop
     cells: tuple                # absolute (x, y) cells
+    slide: bool = False         # needs moves after the drop (a slide or tuck), not reachable by a plain hard drop
 
     @property
     def key(self) -> str:
-        return f"r{self.rotation}x{self.x}"
+        return f"r{self.rotation}x{self.x}y{self.y}" if self.slide else f"r{self.rotation}x{self.x}"
 
 
 @dataclass
@@ -64,6 +70,11 @@ class Features:
     wells: int                  # total depth of wells (columns lower than both neighbours)
     landing: int                # height of the piece's lowest cell above the floor
     max_well: int = 0           # the deepest well: a column kept open this deep is ready for a Tetris
+    enclosed: int = 0           # covered empty cells no piece can reach any more (true holes)
+    overhang: int = 0           # covered empty cells still open to the side (a slide can fill them)
+    new_enclosed: int = 0
+    new_overhang: int = 0
+    ready_rows: int = 0         # rows missing exactly one cell that is open from above (Tetris setup)
 
 
 def column_heights(board):
@@ -93,6 +104,31 @@ def wells_depth(heights):
     return total
 
 
+def cover_split(board, heights=None):
+    """-> (enclosed, overhang): covered empty cells, split by whether open air reaches them through empty cells."""
+    heights = heights or column_heights(board)
+    open_ = set((x, y) for x in range(WIDTH) for y in range(HEIGHT - heights[x]))
+    q = deque(open_)
+    while q:
+        x, y = q.popleft()
+        for nx, ny in ((x - 1, y), (x + 1, y), (x, y + 1), (x, y - 1)):
+            if 0 <= nx < WIDTH and 0 <= ny < HEIGHT and (nx, ny) not in open_ and not board[ny][nx]:
+                open_.add((nx, ny)); q.append((nx, ny))
+    covered = [(x, y) for x in range(WIDTH) for y in range(HEIGHT - heights[x], HEIGHT) if not board[y][x]]
+    over = sum(1 for c in covered if c in open_)
+    return len(covered) - over, over
+
+
+def ready_rows(board, heights=None):
+    """Rows with exactly one empty cell whose column is open above that row: one I piece away from clearing."""
+    heights = heights or column_heights(board)
+    n = 0
+    for y in range(HEIGHT):
+        empty = [x for x in range(WIDTH) if not board[y][x]]
+        if len(empty) == 1 and HEIGHT - heights[empty[0]] > y: n += 1
+    return n
+
+
 def max_well_depth(heights):
     return max(max(0, min(heights[x - 1] if x > 0 else HEIGHT, heights[x + 1] if x < WIDTH - 1 else HEIGHT) - heights[x])
                for x in range(WIDTH))
@@ -100,8 +136,10 @@ def max_well_depth(heights):
 
 def board_features(board):
     hs = column_heights(board)
+    enclosed, overhang = cover_split(board, hs)
     return {"heights": hs, "holes": count_holes(board, hs), "max_height": max(hs), "agg_height": sum(hs),
-            "bumpiness": sum(abs(hs[i] - hs[i + 1]) for i in range(WIDTH - 1)), "wells": wells_depth(hs)}
+            "bumpiness": sum(abs(hs[i] - hs[i + 1]) for i in range(WIDTH - 1)), "wells": wells_depth(hs),
+            "enclosed": enclosed, "overhang": overhang, "ready_rows": ready_rows(board, hs), "max_well": max_well_depth(hs)}
 
 
 def _fits(board, cells, ox, oy):
@@ -144,26 +182,53 @@ class Game:
         return self.bag.pop()
 
     def placements(self, piece: str | None = None, board=None) -> list[Placement]:
-        """Every final resting place reachable by rotating at the top and hard-dropping, entirely inside the board."""
+        """Every final resting place reachable from above, entirely inside the board: first the plain hard drops, then
+        the places only a slide, tuck or rotation after the drop reaches (breadth-first over rotation/column/row)."""
         piece, board = piece or self.current, board or self.board
-        out = []
-        for r, cells in enumerate(ROTATIONS[piece]):
+        rots = ROTATIONS[piece]
+        out, seen = [], set()
+        starts = []
+        for r, cells in enumerate(rots):
             w = max(x for x, _ in cells) + 1
             for ox in range(WIDTH - w + 1):
                 oy = -4
                 if not _fits(board, cells, ox, oy): continue
+                starts.append((r, ox, oy))
                 while _fits(board, cells, ox, oy + 1): oy += 1
                 if oy < 0: continue      # would stick out of the top: not legal
-                out.append(Placement(piece, r, ox, oy, tuple((ox + x, oy + y) for x, y in cells)))
+                abs_cells = tuple(sorted((ox + x, oy + y) for x, y in cells))
+                if abs_cells in seen: continue
+                seen.add(abs_cells)
+                out.append(Placement(piece, r, ox, oy, abs_cells))
+        visited, q = set(starts), deque(starts)
+        while q:
+            r, x, y = q.popleft()
+            cells = rots[r]
+            if not _fits(board, cells, x, y + 1) and y >= 0:
+                abs_cells = tuple(sorted((x + cx, y + cy) for cx, cy in cells))
+                if abs_cells not in seen:
+                    seen.add(abs_cells)
+                    out.append(Placement(piece, r, x, y, abs_cells, slide=True))
+            nxt = [(r, x - 1, y), (r, x + 1, y), (r, x, y + 1)]
+            if len(rots) > 1:
+                for r2 in ((r + 1) % len(rots), (r - 1) % len(rots)):
+                    nxt += [(r2, x + dx, y) for dx in (0, -1, 1)]
+            for st in nxt:
+                if st not in visited and _fits(board, rots[st[0]], st[1], st[2]):
+                    visited.add(st); q.append(st)
         return out
 
     def features(self, p: Placement) -> Features:
-        before = count_holes(self.board)
+        if getattr(self, "_fb_board", None) is not self.board:   # the board's own features, once per turn
+            self._fb_board, self._fb = self.board, board_features(self.board)
+        b = self._fb
         nb, cleared = apply_placement(self.board, p, 1)
         f = board_features(nb)
-        return Features(lines=cleared, holes=f["holes"], new_holes=f["holes"] - before, max_height=f["max_height"],
+        return Features(lines=cleared, holes=f["holes"], new_holes=f["holes"] - b["holes"], max_height=f["max_height"],
                         agg_height=f["agg_height"], bumpiness=f["bumpiness"], wells=f["wells"],
-                        landing=HEIGHT - max(y for _, y in p.cells), max_well=max_well_depth(f["heights"]))
+                        landing=HEIGHT - max(y for _, y in p.cells), max_well=f["max_well"],
+                        enclosed=f["enclosed"], overhang=f["overhang"], new_enclosed=f["enclosed"] - b["enclosed"],
+                        new_overhang=f["overhang"] - b["overhang"], ready_rows=f["ready_rows"])
 
     def step(self, p: Placement) -> int:
         """Place the current piece. -> lines cleared. Ends the game when the next piece has no legal placement."""

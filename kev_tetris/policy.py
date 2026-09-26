@@ -26,8 +26,11 @@ class Decision:
 class KevPolicy:
     """Asks a running Kev server. temperature 0 = the argmax; > 0 samples from p^(1/T) (exploration for RL)."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:8009", temperature: float = 0.0, seed: int | None = None, timeout: float = 60):
-        self.base_url, self.temperature, self.timeout = base_url.rstrip("/"), temperature, timeout
+    def __init__(self, base_url: str = "http://127.0.0.1:8009", temperature: float = 0.0, seed: int | None = None, timeout: float = 300,
+                 allow=None):
+        """allow(game, placements) -> the placements sampling may pick from (None = all); only used when temperature > 0.
+        The first request after a server start compiles kernels for a while, hence the long timeout."""
+        self.base_url, self.temperature, self.timeout, self.allow = base_url.rstrip("/"), temperature, timeout, allow
         self.rng = random.Random(seed)
 
     def decide(self, game: Game) -> Decision:
@@ -39,9 +42,10 @@ class KevPolicy:
             resp = json.load(r)
         chosen, probs = read_answer(resp["answers"], placements)
         if self.temperature > 0:
-            keys = [p.key for p in placements]
+            pool = (self.allow(game, placements) if self.allow else None) or placements
+            keys = [p.key for p in pool]
             w = [max(probs.get(k, 0.0), 1e-9) ** (1 / self.temperature) for k in keys]
-            chosen = placements[self.rng.choices(range(len(keys)), weights=w)[0]]
+            chosen = pool[self.rng.choices(range(len(keys)), weights=w)[0]]
         return Decision(chosen, probs, resp.get("latency_ms", (time.perf_counter() - t0) * 1000))
 
 
