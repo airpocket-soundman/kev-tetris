@@ -11,7 +11,7 @@
   :root {
     --bg: #f6f7fb; --surface: #ffffff; --surface2: #eef0f7; --line: #d9ddea;
     --text: #151a2e; --muted: #5b6380; --accent: #1668b8;
-    --s1: #1f94c4; --s2: #c77a22; --s3: #9b6bd6; --grid: #e3e6f0;
+    --s1: #1f94c4; --s2: #c77a22; --s3: #9b6bd6; --s4: #3a9a52; --grid: #e3e6f0;
     --good: #1e7a4c; --warn: #9a5b00;
   }
   @media (prefers-color-scheme: dark) {
@@ -54,7 +54,7 @@
   td.num { text-align: right; font-family: "JetBrains Mono", monospace; }
   tr:last-child td { border-bottom: 0; }
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .tag.v1 { border-color: var(--s1); } .tag.v2 { border-color: var(--s2); } .tag.v3 { border-color: var(--s3); }
+  .tag.v1 { border-color: var(--s1); } .tag.v2 { border-color: var(--s2); } .tag.v3 { border-color: var(--s3); } .tag.v4 { border-color: var(--s4); }
   .hl { font-weight: 700; color: var(--accent); }
   .chart { width: 100%; height: 280px; }
   .chart text { font-family: "JetBrains Mono", monospace; font-size: 12px; fill: var(--muted); }
@@ -162,7 +162,7 @@
     <h2>成績の推移</h2>
     <p>実力テスト(5ゲーム・同じブロック順)の <b>1ミノあたりの得点とライン数</b>。1手あたりの値なので、テストの手数の上限(今は500手)を変えても比べられる。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統、第12世代以降は v3 だ。</p>
     <div class="card">
-      <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span><span><i style="background:var(--s3)"></i>報酬 v3(第12世代〜、第6世代から分岐)</span></div>
+      <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span><span><i style="background:var(--s3)"></i>報酬 v3(第12〜13世代、第6世代から分岐)</span><span><i style="background:var(--s4)"></i>報酬 v4(第14世代〜、第12世代から)</span></div>
       <svg class="chart" id="scoreChart" role="img" aria-label="世代ごとの1ミノあたり得点"></svg>
     </div>
     <div class="card">
@@ -197,22 +197,25 @@
     <h2>報酬の変遷</h2>
     <p>報酬は、練習試合の各手を評価するための点数で、実力テストの得点とは別物だ。</p>
     <div class="tablewrap"><table>
-      <tr><th>項目</th><th><span class="tag v1">v1</span> 第1〜8世代</th><th><span class="tag v2">v2</span> 第9〜11世代</th><th><span class="tag v3">v3</span> 第12世代〜(現在)</th></tr>
-      <tr><td>1列 / 2列 / 3列消し</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td></tr>
-      <tr><td>4列消し(テトリス)</td><td class="num">+8</td><td class="num hl">+16</td><td class="num">+16</td></tr>
-      <tr><td>1手生き延びる</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td></tr>
-      <tr><td>完全に塞がった穴が増える</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−1.0</td></tr>
-      <tr><td>オーバーハング(上にブロック、横は開いた空白)が増える</td><td class="num">−0.4(穴と同じ)</td><td class="num">−0.4(穴と同じ)</td><td class="num hl">−0.5</td></tr>
-      <tr><td>穴・オーバーハングの解消</td><td class="num">0</td><td class="num">0</td><td class="num hl">+0.8 / マス</td></tr>
-      <tr><td>最高の高さの増加</td><td class="num">−0.05</td><td class="num hl">なし</td><td class="num">なし</td></tr>
-      <tr><td>天井近く(上から4段以内)に積む</td><td class="num">(高さの減点に含む)</td><td class="num">なし</td><td class="num hl">−0.5 / 段</td></tr>
-      <tr><td>ゲームオーバー</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td></tr>
-      <tr><td>割引率</td><td class="num">0.9</td><td class="num hl">0.97</td><td class="num">0.97</td></tr>
-      <tr><td>Kev への指示</td><td>ラインを消し、穴を作らず、低く平らに保つ</td><td>1列を井戸として空け、I ミノでテトリスを狙う</td><td>v2 に加えて、塞がった穴とオーバーハングの区別、天井に近づかないこと</td></tr>
-      <tr><td>置き方の候補</td><td>回転して真下に落とす</td><td>同じ</td><td class="hl">滑り込み・回転入れも含む(ゲームのルール2、SRS)</td></tr>
-      <tr><td>学習する手の選び方</td><td>1手ごとのアドバンテージの上位35%</td><td>同じ(v2 の手だけを使う)</td><td class="hl">直前10手のウィンドウ(1手ずつずらす)で評価。穴を塞いだ手は除く</td></tr>
-      <tr><td>練習試合</td><td>200手まで、温度 1.0</td><td>同じ</td><td class="hl">400手まで。85%の手は Kev の一番の手、15%だけ上位3候補から探索。穴を作らない手を優先。4分の1は練習問題の盤面から</td></tr>
-      <tr><td>親の世代</td><td>直前の世代</td><td>直前の世代(最初は第6世代)</td><td class="hl">直近3世代のうちテストの成績が最良の世代(最初は第6世代)</td></tr>
+      <tr><th>項目</th><th><span class="tag v1">v1</span> 第1〜8世代</th><th><span class="tag v2">v2</span> 第9〜11世代</th><th><span class="tag v3">v3</span> 第12〜13世代</th><th><span class="tag v4">v4</span> 第14世代〜(現在)</th></tr>
+      <tr><td>1列 / 2列 / 3列消し</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num hl">安全な間 +0.2 / +0.8 / +3、危険な高さでは +1 / +3 / +5</td></tr>
+      <tr><td>4列消し(テトリス)</td><td class="num">+8</td><td class="num hl">+16</td><td class="num">+16</td><td class="num">+16</td></tr>
+      <tr><td>1手生き延びる</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td></tr>
+      <tr><td>完全に塞がった穴が増える</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−1.0</td><td class="num">−1.0</td></tr>
+      <tr><td>オーバーハング(上にブロック、横は開いた空白)が増える</td><td class="num">−0.4(穴と同じ)</td><td class="num">−0.4(穴と同じ)</td><td class="num hl">−0.5</td><td class="num">−0.5</td></tr>
+      <tr><td>穴・オーバーハングの解消</td><td class="num">0</td><td class="num">0</td><td class="num hl">+0.8 / マス</td><td class="num">+0.8 / マス</td></tr>
+      <tr><td>最高の高さの増加</td><td class="num">−0.05</td><td class="num hl">なし</td><td class="num">なし</td><td class="num">なし</td></tr>
+      <tr><td>天井近く(上から4段以内)に積む</td><td class="num">(高さの減点に含む)</td><td class="num">なし</td><td class="num hl">−0.5 / 段</td><td class="num">−0.5 / 段</td></tr>
+      <tr><td>連続テトリス / T-スピン</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">連続テトリス +8、T-スピン 1列につき +4</td></tr>
+      <tr><td>盤面の良さ(整形)</td><td class="num">なし</td><td class="num">なし</td><td>穴・オーバーハング・準備済みの行・井戸・天井近く</td><td class="hl">v3 + 行遷移・列遷移・穴の深さ・穴のある行数(Dellacherie / BCTS)</td></tr>
+      <tr><td>実力テスト</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num hl">10ゲーム</td></tr>
+      <tr><td>ゲームオーバー</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td></tr>
+      <tr><td>割引率</td><td class="num">0.9</td><td class="num hl">0.97</td><td class="num">0.97</td><td class="num">0.97</td></tr>
+      <tr><td>Kev への指示</td><td>ラインを消し、穴を作らず、低く平らに保つ</td><td>1列を井戸として空け、I ミノでテトリスを狙う</td><td>v2 に加えて、塞がった穴とオーバーハングの区別、天井に近づかないこと</td><td>v3 と同じ(候補に T-スピンを表示)</td></tr>
+      <tr><td>置き方の候補</td><td>回転して真下に落とす</td><td>同じ</td><td class="hl">滑り込み・回転入れも含む(ゲームのルール2、SRS)</td><td>v3 と同じ(ルール3: 見えない段、15回の制限)</td></tr>
+      <tr><td>学習する手の選び方</td><td>1手ごとのアドバンテージの上位35%</td><td>同じ(v2 の手だけを使う)</td><td class="hl">直前10手のウィンドウ(1手ずつずらす)で評価。穴を塞いだ手は除く</td><td class="hl">v3 と同じ + 名手の記録(上位ゲームの良い手を最大600手保存して再学習)</td></tr>
+      <tr><td>練習試合</td><td>200手まで、温度 1.0</td><td>同じ</td><td class="hl">400手まで。85%の手は Kev の一番の手、15%だけ上位3候補から探索。穴を作らない手を優先。4分の1は練習問題の盤面から</td><td>v3 と同じ</td></tr>
+      <tr><td>親の世代</td><td>直前の世代</td><td>直前の世代(最初は第6世代)</td><td class="hl">直近3世代のうちテストの成績が最良の世代(最初は第6世代)</td><td>直近3世代で最良(最初は同じルールの最良世代 = 第12世代)</td></tr>
     </table></div>
     <h3>見直しの理由</h3>
     <ul>
@@ -253,7 +256,7 @@
       <div class="card"><b>練習試合での穴の回避</b><p>穴を作らない候補がある限り、そこから選ぶ(まれに例外を許す)。くじ引きの温度を1.0から0.7に下げる。</p></div>
       <div class="card"><b>4段消しの練習問題と、親の選び方</b><p>練習試合の4分の1を、井戸があり何段か準備済みの盤面から始める。直近数世代のうち、テストの成績が最も良い世代を親にする。</p></div>
     </div>
-    <h3>v4 の案(v3 の評価後に検討)</h3>
+    <h3>v4(第14世代から実施中。後半の 1・2 はこれから)</h3>
     <p><b>基本方針は、長期の戦略を立てられるようにすること</b>。先のミノは見せない(見せるのは現在と次だけ)条件のまま、手の良し悪しを長い目で評価できるようにする。</p>
     <div class="grid">
       <div class="card"><b>1. Kev 自身に盤面の良さを答えさせる</b><p>Kev は1回の計算で複数の質問に答えられる。「この盤面はこの先どれくらい良いか」という段階評価の質問を追加して学習させる。手の評価の基準(今は盤面の特徴から計算する単純な式)を、Kev 自身の判断に置き換える。</p></div>
@@ -327,8 +330,9 @@
       <li><b>v2 でテトリスを狙わせる(第9〜10世代、Windows)</b><span class="status done">完了</span></li>
       <li><b>高速化: Docker + 高速化ライブラリ(4B のまま)</b><span class="status done">推論は約26%短縮。学習は測定中</span></li>
       <li><b>v2 の学習を再開(第11世代、コンテナで実行)</b><span class="status done">完了。1ミノあたり得点 38.4 → 40.4、平均手数 240 → 351 に回復</span></li>
-      <li class="todo"><b>v3 で学習(10手ウィンドウ、滑り込み・回転入れ、穴の報酬、生き残りの立て直し、練習問題)</b><span class="status now">進行中(第12世代〜)</span></li>
-      <li class="todo"><b>v3 の結果を評価し、v4 を検討</b><span class="status next">v3 の数世代後</span></li>
+      <li><b>v3 で学習(第12〜13世代、ルール3)</b><span class="status done">1ミノあたり得点 36.3 → 30.2、平均手数 151 → 86 と伸び悩み、v4 を前倒し</span></li>
+      <li class="todo"><b>v4 で学習(第14世代〜、第12世代から)</b><span class="status now">進行中。報酬・盤面の評価・名手の記録・テスト10ゲーム</span></li>
+      <li class="todo"><b>v4 後半: Kev 自身に盤面の良さを答えさせる、現在と次のミノで2手の先読み探索</b><span class="status next">v4 の数世代後</span></li>
       <li class="todo"><b>v3 の世代を 0.8B に蒸留する</b><span class="status next">v3 が条件を満たしたら</span></li>
       <li class="todo"><b>さらなる高速化(複数ゲームの同時進行、0.8B + CUDA グラフの試行)</b><span class="status next">未着手</span></li>
     </ul>
@@ -342,7 +346,7 @@
 const DATA = window.KEV_DATA || { gens: [], updated: "-", training: {} };
 const GENS = DATA.gens.filter(g => g.score != null);
 const fmt = n => n == null ? "-" : Number(n).toLocaleString("ja-JP");
-const colorOf = g => g.reward === "v3" ? "var(--s3)" : g.reward === "v2" ? "var(--s2)" : "var(--s1)";
+const colorOf = g => g.reward === "v4" ? "var(--s4)" : g.reward === "v3" ? "var(--s3)" : g.reward === "v2" ? "var(--s2)" : "var(--s1)";
 
 document.getElementById("updated").textContent = DATA.updated;
 const tr_ = DATA.training || {};

@@ -31,7 +31,7 @@ from .tetris import RULES, Game, board_features
 ROOT = Path(__file__).resolve().parent.parent
 # reward "v2": a Tetris is worth twice the game's own ratio (1/3/5/8), and stack height is not penalised: building for
 # a Tetris means stacking high on purpose. Records from different reward versions are never trained on together.
-REWARD_VERSION = "v3"   # v3: hole/overhang split with a bonus for resolving, danger zone, 10-move window credit (docs/plan.md 5)
+REWARD_VERSION = "v4"   # v4: v3 + Cold Clear style line rewards, B2B, T-spins, Dellacherie/BCTS potential, elite games (docs/plan.md 5.7)
 LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 # v4 (Cold Clear style): while the stack is safe, singles and doubles are worth little - build for a Tetris instead
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
@@ -498,7 +498,7 @@ def main(argv=None):
     ap.add_argument("--branch_from", type=int, default=None, help="start the current reward version from this generation (used until one of its generations exists)")
     ap.add_argument("--keep_frac", type=float, default=0.35, help="fraction of decisions kept as training records (top positive advantage)")
     ap.add_argument("--buffer_gens", type=int, default=2, help="also train on the records of this many previous generations")
-    ap.add_argument("--eval_games", type=int, default=5)
+    ap.add_argument("--eval_games", type=int, default=10, help="test games (10 since v4: per-piece results are compared, less noise)")
     ap.add_argument("--eval_max_pieces", type=int, default=500, help="test games stop here, so a strong generation still finishes; generations are compared by mean score")
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=5e-5)
