@@ -10,7 +10,7 @@ what it is asked at play time.
 """
 from __future__ import annotations
 
-from .tetris import HEIGHT, WIDTH, Game, Placement, board_features
+from .tetris import HEIGHT, WIDTH, Game, Placement, board_features, is_tspin
 
 INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to place the current piece. A Tetris (4 lines "
                 "at once) scores far more than single lines: stack flat, keep one column open as a deep well, and fill it "
@@ -43,7 +43,7 @@ def option_text(game: Game, p: Placement) -> str:
     f = game.features(p)
     cols = sorted({x for x, _ in p.cells})
     span = f"col {cols[0]}" if len(cols) == 1 else f"cols {cols[0]}-{cols[-1]}"
-    how = ", slide" if p.slide else ""
+    how = (", slide" if p.slide else "") + (", T-spin" if is_tspin(game.board, p) else "")
     return (f"rot {p.rotation}, {span}{how}: clears {f.lines}, holes {f.enclosed} ({f.new_enclosed:+d}), "
             f"overhangs {f.overhang} ({f.new_overhang:+d}), height {f.max_height}, bumps {f.bumpiness}, "
             f"well {f.max_well}, ready {f.ready_rows}")

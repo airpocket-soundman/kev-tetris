@@ -26,13 +26,16 @@ import numpy as np
 from . import generations, kevenv, live, proc, replays
 from .interface import to_record
 from .policy import KevPolicy, KevServer
-from .tetris import Game, board_features
+from .tetris import RULES, Game, board_features
 
 ROOT = Path(__file__).resolve().parent.parent
 # reward "v2": a Tetris is worth twice the game's own ratio (1/3/5/8), and stack height is not penalised: building for
 # a Tetris means stacking high on purpose. Records from different reward versions are never trained on together.
 REWARD_VERSION = "v3"   # v3: hole/overhang split with a bonus for resolving, danger zone, 10-move window credit (docs/plan.md 5)
 LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
+# v4 (Cold Clear style): while the stack is safe, singles and doubles are worth little - build for a Tetris instead
+LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
+SAFE_HEIGHT = 10
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
 STATUS = ROOT / "runs" / "rl_status.json"     # written here, read by the control page and the stream screen
 
@@ -126,8 +129,13 @@ class Episode:
 DANGER_HEIGHT = 16   # the top 4 rows: stacking into them is penalised, the rest of the height is free (Tetris setups)
 
 
-def shaped_reward(before: dict, after: dict, cleared: int, died: bool) -> float:
-    r = LINE_REWARD[cleared] + 0.05
+def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bool = False, b2b: int = 0) -> float:
+    if REWARD_VERSION == "v4":
+        r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
+        if cleared and b2b >= 2: r += 8.0                  # back-to-back Tetris / T-spin clear
+        if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
+    else:
+        r = LINE_REWARD[cleared] + 0.05
     r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
     r -= 0.5 * max(0, after["overhang"] - before["overhang"])     # a covered cell a slide can still fill
     # resolved: filled by a slide, or uncovered because the rows above cleared. Less than the penalty, so creating a
@@ -140,13 +148,17 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool) -> float:
 
 def potential(f: dict) -> float:
     """How good a board is, for the window credit: few holes, rows ready for a Tetris, a well (capped at 4 deep)."""
-    return -1.0 * f["enclosed"] - 0.5 * f["overhang"] + 0.3 * f["ready_rows"] + 0.2 * min(f["max_well"], 4) \
+    phi = -1.0 * f["enclosed"] - 0.5 * f["overhang"] + 0.3 * f["ready_rows"] + 0.2 * min(f["max_well"], 4) \
         - 0.5 * max(0, f["max_height"] - DANGER_HEIGHT)
+    if REWARD_VERSION == "v4":   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
+        phi -= 0.1 * f["row_transitions"] + 0.1 * f["col_transitions"] + 0.2 * f["hole_depth"] + 0.5 * f["hole_rows"]
+    return phi
 
 
 def value_features(f: dict) -> list[float]:
     return [1.0, f["enclosed"], f["overhang"], f["max_height"], f["agg_height"] / 10, f["bumpiness"], f["wells"],
-            f["ready_rows"], min(f["max_well"], 4)]
+            f["ready_rows"], min(f["max_well"], 4), f["row_transitions"] / 10, f["col_transitions"] / 10,
+            f["hole_depth"], f["hole_rows"]]
 
 
 def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None) -> Episode:
@@ -164,7 +176,7 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         cleared = game.step(d.placement)
         if on_move: on_move(live.move_event(game, pre, placements, d, piece))
         after = board_features(game.board)
-        ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over), value_features(before),
+        ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b), value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0))
         ep.moves.append(replays.move_record(d))
@@ -391,9 +403,10 @@ def run_loop(a, ctl: Control):
         # parent: the best tested generation among the latest few of this reward version; the first one of a version
         # starts from the best generation so far (or --branch_from)
         mine = [x for x in gens if x.get("reward") == REWARD_VERSION and x.get("eval")]
+        same_rules = [x for x in gens if x.get("eval") and x.get("rules", 1) == RULES]   # scores under other rules don't compare
         if mine: pool = mine[-a.parent_window:]
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
-        else: pool = [x for x in gens if x.get("eval")]
+        else: pool = same_rules or [x for x in gens if x.get("eval")]
         prev = max(pool, key=lambda x: x["eval"]["mean_score"])
         if a.generations and g > a.generations: break   # 0 = until stopped
         t0 = time.time()
@@ -418,9 +431,20 @@ def run_loop(a, ctl: Control):
         data = data_dir / f"gen-{g:03d}.jsonl"
         data.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs), encoding="utf-8")
 
+        # elite games: the moves that went well in the practice games with the best score per piece are kept across
+        # generations (capped) and trained on again (self-imitation)
+        elite = data_dir / f"elite-{REWARD_VERSION}.jsonl"
+        if a.elite_games and not a.demo:
+            best = sorted((e for e in eps if e.pieces >= 50), key=lambda e: e.score / e.pieces, reverse=True)[:a.elite_games]
+            keep = {id(s) for e in best for s in e.steps}
+            new = [json.dumps(s.record, ensure_ascii=False) for s in steps
+                   if id(s) in keep and s.adv > 0 and s.new_enclosed <= 0 and len(json.dumps(s.record)) <= MAX_RECORD_CHARS]
+            old = elite.read_text(encoding="utf-8").splitlines() if elite.exists() else []
+            elite.write_text("\n".join((old + new)[-a.elite_cap:]) + "\n" if old or new else "", encoding="utf-8")
         merged = data_dir / f"train-{g:03d}.jsonl"
         same = sorted(x["gen"] for x in gens if x.get("reward", "v1") == REWARD_VERSION)[-a.buffer_gens:] if a.buffer_gens else []
         parts = [data_dir / f"gen-{k:03d}.jsonl" for k in same + [g]]   # only records chosen under this reward
+        if a.elite_games and elite.exists(): parts.append(elite)
         merged.write_text("".join(p.read_text(encoding="utf-8") for p in parts if p.exists()), encoding="utf-8")
         n_merged = sum(1 for _ in merged.open(encoding="utf-8"))
         print(f"[gen {g}] {len(recs)} records from {sum(len(e.steps) for e in eps)} decisions; training on {n_merged}", flush=True)
@@ -440,6 +464,7 @@ def run_loop(a, ctl: Control):
         with serving(run) as srv:
             ev = evaluate(policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g))
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
+                 "rules": RULES,
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
                            "minutes": round((time.time() - t0) / 60, 1)},
@@ -467,6 +492,8 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
+    ap.add_argument("--elite_games", type=int, default=2, help="practice games per generation whose good moves join the elite set")
+    ap.add_argument("--elite_cap", type=int, default=600, help="records kept in the elite set")
     ap.add_argument("--gamma", type=float, default=0.97)
     ap.add_argument("--branch_from", type=int, default=None, help="start the current reward version from this generation (used until one of its generations exists)")
     ap.add_argument("--keep_frac", type=float, default=0.35, help="fraction of decisions kept as training records (top positive advantage)")

@@ -221,12 +221,50 @@ def max_well_depth(heights):
                for x in range(WIDTH))
 
 
+def transitions(board):
+    """Dellacherie's row and column transitions: filled/empty changes along each row (walls count as filled) and down
+    each column (the floor counts as filled). Rugged, holey boards have many."""
+    H = len(board)
+    rows = sum(sum(1 for a, b in zip([1] + row, row + [1]) if bool(a) != bool(b)) for row in board if any(row))
+    cols = 0
+    for x in range(WIDTH):
+        col = [board[y][x] for y in range(H)] + [1]
+        cols += sum(1 for a, b in zip(col, col[1:]) if bool(a) != bool(b))
+    return rows, cols
+
+
+def hole_stats(board, heights=None):
+    """BCTS: total hole depth (filled cells above each hole in its column) and the number of rows with a hole."""
+    heights = heights or column_heights(board)
+    H, depth, rows = len(board), 0, set()
+    for x in range(WIDTH):
+        above = 0
+        for y in range(H - heights[x], H):
+            if board[y][x]: above += 1
+            else: depth += above; rows.add(y)
+    return depth, len(rows)
+
+
 def board_features(board):
     hs = column_heights(board)
     enclosed, overhang = cover_split(board, hs)
+    row_t, col_t = transitions(board)
+    hole_depth, hole_rows = hole_stats(board, hs)
     return {"heights": hs, "holes": count_holes(board, hs), "max_height": max(hs), "agg_height": sum(hs),
             "bumpiness": sum(abs(hs[i] - hs[i + 1]) for i in range(WIDTH - 1)), "wells": wells_depth(hs),
-            "enclosed": enclosed, "overhang": overhang, "ready_rows": ready_rows(board, hs), "max_well": max_well_depth(hs)}
+            "enclosed": enclosed, "overhang": overhang, "ready_rows": ready_rows(board, hs), "max_well": max_well_depth(hs),
+            "row_transitions": row_t, "col_transitions": col_t, "hole_depth": hole_depth, "hole_rows": hole_rows}
+
+
+def is_tspin(board, p) -> bool:
+    """A T placed by rotating in (not a plain drop) with at least 3 of the 4 corners of its 3x3 box filled (walls and
+    floor count) - the usual 3-corner rule, checked on the board before the lines clear."""
+    if p.piece != "T" or not p.slide: return False
+    xs = [x for x, _ in p.cells]; ys = [y for _, y in p.cells]
+    cx = sorted(xs)[1]; cy = sorted(ys)[1]                          # the T's centre is its median cell
+    corners = [(cx - 1, cy - 1), (cx + 1, cy - 1), (cx - 1, cy + 1), (cx + 1, cy + 1)]
+    filled = sum(1 for x, y in corners if x < 0 or x >= WIDTH or y >= len(board) or (y >= 0 and board[y][x]))
+    return filled >= 3
 
 
 def _fits(board, cells, ox, oy):
@@ -256,6 +294,8 @@ class Game:
     pieces: int = 0
     tetrises: int = 0
     over: bool = False
+    b2b: int = 0                # consecutive Tetrises / T-spin clears (back-to-back chain), 0 after any other clear
+    last_tspin: bool = False    # the last placement was a T-spin
 
     def __post_init__(self):
         if self.rules >= 3 and len(self.board) == HEIGHT:   # hidden rows above the visible field
@@ -406,10 +446,14 @@ class Game:
     def step(self, p: Placement) -> int:
         """Place the current piece. -> lines cleared. Ends the game when the next piece has no legal placement."""
         assert not self.over and p.piece == self.current
+        self.last_tspin = is_tspin(self.board, p)          # judged on the board before the lines clear
         self.board, cleared = apply_placement(self.board, p, PIECES.index(p.piece) + 1)
         self.pieces += 1
         self.lines += cleared
         self.tetrises += cleared == 4
+        if cleared:   # back-to-back: a Tetris or a T-spin clear right after another one, singles/doubles break it
+            difficult = cleared == 4 or self.last_tspin
+            self.b2b = self.b2b + 1 if difficult else 0
         self.score += LINE_SCORE[cleared]
         self.current, self.next = self.next, self._draw()
         if self.rules >= 3 and not cleared and all(y < self.hidden for _, y in p.cells):
