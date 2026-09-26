@@ -162,6 +162,17 @@ v2 の効果を見てから、次をまとめて入れる。v2 の検証が濁�
 
 参考: [The Game of Tetris in Machine Learning(Algorta & Şimşek)](https://arxiv.org/abs/1905.01652)、[CBMPI(NeurIPS 2013)](https://papers.nips.cc/paper/5190-approximate-dynamic-programming-finally-performs-well-in-the-game-of-tetris.pdf)、[nuno-faria/tetris-ai](https://github.com/nuno-faria/tetris-ai)、[Cold Clear](https://github.com/MinusKelvin/cold-clear)
 
+### 5.8 v5 の案(先生つき学習が頭打ちになったら)
+
+頭打ちの目安: 1ミノあたり得点と平均手数が、2〜3世代続けて伸びない。
+
+1. **局面に応じた戦い方の切り替え**
+   - 先生の評価を高さの帯で変える(Cold Clear 型): 低い(3分の1以下)は井戸掘りと4段消しの準備を重視し、1列・2列消しはほぼ評価しない。穴があるときは、穴の上の段を消して解消することを最優先。半分を超えたら生き残り重視で、どの消し方も評価し、高さを強く減点し、平らにする
+   - Kev への問いかけに、局面の一行(「低い: 4段消しの準備」「穴あり: 穴の解消を優先」「高い: 生き残り優先」)を加える
+2. **複数手の連携**
+   - 先読みを3手目まで広げる。3手目のミノは見えないので、7種類それぞれの最善手の平均で評価する(見えない情報は使わない)
+   - 先生が選んだ一連の手を、つながりとして学習させる
+
 ### 5.6 ゲームのルールの見直し(第12世代から)
 
 - ミノは最上段の中央に出現し、そこで重なったらゲームオーバー(以前は、置き場所が1つでもあれば続行し、どの列にも上から降りてこられた)

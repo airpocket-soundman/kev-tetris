@@ -278,6 +278,13 @@
     </table></div>
     <p class="meta">参考: <a href="https://arxiv.org/abs/1905.01652">The Game of Tetris in Machine Learning</a> / <a href="https://papers.nips.cc/paper/5190-approximate-dynamic-programming-finally-performs-well-in-the-game-of-tetris.pdf">CBMPI</a> / <a href="https://github.com/nuno-faria/tetris-ai">nuno-faria/tetris-ai</a> / <a href="https://github.com/MinusKelvin/cold-clear">Cold Clear</a></p>
 
+    <h3>v5 の案(先生つき学習が頭打ちになったら)</h3>
+    <div class="grid">
+      <div class="card"><b>局面に応じた戦い方</b><p>低いときは井戸掘りと4段消しの準備、穴があるときは穴の解消を最優先、半分を超えたら生き残り重視。先生の評価を高さの帯で切り替え、Kev への問いかけにも今の局面を一行で伝える。</p></div>
+      <div class="card"><b>複数手の連携</b><p>先読みを3手目まで広げる。見えない3手目のミノは、7種類それぞれの最善手の平均で評価する。先生の一連の手を、つながりとして学習させる。</p></div>
+    </div>
+    <p class="meta">頭打ちの目安: 1ミノあたり得点と平均手数が、2〜3世代続けて伸びない。</p>
+
     <h3>0.8B への蒸留</h3>
     <p>v3 の世代が「500手まで5ゲーム中4以上生き残る」「1ラインあたり140点以上」「テトリスが毎ゲーム数回」を満たしたら、その世代を先生にして Kev-0.8B に蒸留する。そのあとは 0.8B で、CUDA グラフと複数ゲームの同時進行を使って世代を速く回す。成績が 4B に届かない場合は 4B を使い続ける。</p>
 
