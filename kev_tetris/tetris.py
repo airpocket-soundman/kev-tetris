@@ -216,15 +216,31 @@ def ready_rows(board, heights=None):
     return n
 
 
+def canyons(heights, max_width: int = 3) -> list[tuple[int, int, int]]:
+    """Wells 1-3 columns wide: runs of adjacent columns all lower than both sides (the walls count as tall).
+    -> [(first column, width, depth)], depth = lower side - highest column inside. Narrow runs are found first, so a
+    1-wide well inside a wider dip counts as itself."""
+    tall = HEIGHT * 2
+    used, out = set(), []
+    for w in range(1, max_width + 1):
+        for i in range(WIDTH - w + 1):
+            cols = range(i, i + w)
+            if any(c in used for c in cols): continue
+            side = min(heights[i - 1] if i > 0 else tall, heights[i + w] if i + w < WIDTH else tall)
+            depth = min(side, HEIGHT) - max(heights[c] for c in cols)
+            if depth >= 2:                         # a step of 1 is just bumpiness
+                out.append((i, w, depth)); used.update(cols)
+    return out
+
+
 def extra_wells_cumulative(heights):
-    """Dellacherie's cumulative wells (a well d deep counts 1+2+...+d) over every well but the deepest: a second deep
-    well grows costly fast, so it gets filled instead of built around."""
-    depths = []
-    for x in range(WIDTH):
-        d = min(heights[x - 1] if x > 0 else HEIGHT, heights[x + 1] if x < WIDTH - 1 else HEIGHT) - heights[x]
-        if d > 0: depths.append(d)
-    depths.sort()
-    return sum(d * (d + 1) // 2 for d in depths[:-1])
+    """Dellacherie's cumulative wells (a well d deep counts 1+2+...+d) over every well 1-3 columns wide except the one
+    kept for the I piece (the deepest 1-wide well). A second well, or a 2-3 wide dip, grows costly fast with its depth,
+    so it gets filled (and lines cleared) instead of built around."""
+    wells = canyons(heights)
+    singles = [c for c in wells if c[1] == 1]
+    main = max(singles, key=lambda c: c[2]) if singles else None
+    return sum(d * (d + 1) // 2 for c in wells if c is not main for d in (c[2],))
 
 
 def max_well_depth(heights):
