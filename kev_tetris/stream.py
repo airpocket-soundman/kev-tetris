@@ -359,7 +359,7 @@ def follow_training(hub, a, stop, load_gens):
                 hub.publish("gen", {**gen_info(entry, gens), "mode": info["phase"], "training_gen": info["training_gen"],
                                     "game": info["game"], "games": info["games"]})
             what = "練習試合" if info["phase"] == "practice" else "テスト"
-            hub.publish("move", {**mv, "left": info["max_pieces"] - mv["pieces"], "next_gen": None,
+            hub.publish("move", {**mv, "left": info["max_pieces"] - mv["pieces"], "next_gen": None, "parallel": info.get("parallel", 1),
                                  "turn_text": f"{what} {info['game']}/{info['games']} ゲーム目",
                                  "turn_progress": (info["game"] - 1 + mv["pieces"] / info["max_pieces"]) / info["games"]})
         time.sleep(0.05)

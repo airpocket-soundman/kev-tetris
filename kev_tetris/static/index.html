@@ -362,7 +362,7 @@ function showThinking(m) {
   if (!t.length) { $("mood").textContent = "-"; return; }
   const p = t[0].p;
   const mood = p > 0.7 ? "迷いなし!" : p > 0.4 ? "だいたい決まり" : p > 0.2 ? "ちょっと迷い中…" : "かなり迷っている…";
-  $("mood").textContent = `${mood}  ・ 思考時間 ${m.latency_ms} ms`;
+  $("mood").textContent = `${mood}  ・ 思考時間 ${m.latency_ms} ms` + (m.parallel > 1 ? `(${m.parallel}ゲーム同時・順番待ち込み)` : "");
 }
 function showStats(m) {
   $("score").textContent = fmt(m.score); $("lines").textContent = fmt(m.lines);

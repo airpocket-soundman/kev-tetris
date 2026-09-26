@@ -441,7 +441,7 @@ def run_loop(a, ctl: Control):
 
     def test_feed(gen):
         return lambda i, ev: feed.publish({"gen": gen, "phase": "test", "game": i + 1, "games": a.eval_games,
-                                           "max_pieces": a.eval_max_pieces, "training_gen": gen}, ev)
+                                           "max_pieces": a.eval_max_pieces, "training_gen": gen, "parallel": a.parallel}, ev)
 
     if not any(g["gen"] == 0 for g in load()):
         start = "demo:0" if a.demo else a.start
@@ -486,7 +486,7 @@ def run_loop(a, ctl: Control):
                 def on_move(ev):
                     if show.shown(i):
                         feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
-                                      "max_pieces": a.max_pieces, "training_gen": g}, ev)
+                                      "max_pieces": a.max_pieces, "training_gen": g, "parallel": a.parallel}, ev)
                 def run():
                     show.start(i)
                     try:
@@ -579,7 +579,8 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
-    ap.add_argument("--parallel", type=int, default=8, help="games played at the same time (practice and tests)")
+    ap.add_argument("--parallel", type=int, default=4, help="games played at the same time (practice and tests); more is faster overall "
+                    "but each game waits longer for Kev (8 games: ~2.3 s per move on 4B without CUDA graphs)")
     ap.add_argument("--teacher", type=int, choices=[0, 1], default=1, help="train on a two-piece lookahead search's moves (v4 part 2)")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
