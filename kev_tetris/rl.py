@@ -715,7 +715,6 @@ def main(argv=None):
     ap.add_argument("--learner", choices=["teacher", "rl"], default="teacher",
                     help="rl: Kev's own lookahead + value answers (expert iteration); set in runs/model.json")
     ap.add_argument("--search_k", type=int, default=4, help="RL: Kev's likeliest moves the lookahead judges")
-    ap.add_argument("--gamma", type=float, default=0.97, help="RL: discount of the value labels' returns")
     ap.add_argument("--value_cap", type=int, default=600, help="RL: value records per generation")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
