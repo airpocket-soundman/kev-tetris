@@ -276,17 +276,21 @@ def assign_window_advantages(episodes: list[Episode], window: int = 10, tetris_b
     return out
 
 
-def value_records(episodes: list[Episode], gamma: float, truncate_tail: int = 60) -> tuple[list[dict], list[float]]:
-    """Value labels (RL): each position's discounted return, binned into the 5 levels of the value question by the
-    returns' quintiles. -> (labelled value requests, the mean return of each level: what a level is worth to the search).
-    Positions in the last `truncate_tail` moves of a game cut off by the piece cap are left out: their future is missing."""
+def value_records(episodes: list[Episode], gamma: float, horizon: int = 10) -> tuple[list[dict], list[float]]:
+    """Value labels (RL): each position's n-step return - the rewards of the next `horizon` moves plus the hand potential
+    of the board after them (a game's end: the rewards only) - binned into the 5 levels of the value question by the
+    targets' quintiles. -> (labelled value requests, the mean target of each level: what a level is worth to the search).
+    Full discounted returns (gens 25-30) were dominated by whether a Tetris happened to come much later: Kev's answers
+    correlated only 0.43 with them."""
     rows = []
     for ep in episodes:
-        g = 0.0
-        for s in reversed(ep.steps):
-            g = s.reward + gamma * g; s.ret = g
-        keep = ep.steps if ep.died else ep.steps[:max(0, len(ep.steps) - truncate_tail)]
-        rows += [(s.value_request, s.ret) for s in keep if s.value_request]
+        st = ep.steps
+        for t, s in enumerate(st):
+            if not s.value_request: continue
+            end = min(t + horizon, len(st))
+            g = sum(gamma ** (k - t) * st[k].reward for k in range(t, end))
+            if not (ep.died and end == len(st)): g += gamma ** (end - t) * st[end - 1].phi_after
+            rows.append((s.value_request, g))
     if not rows: return [], []
     rets = np.array([r for _, r in rows])
     edges = np.quantile(rets, [0.2, 0.4, 0.6, 0.8])
