@@ -357,7 +357,8 @@ def run_loop(a, ctl: Control):
         # practice: sample only among moves that seal no hole while there are any (5% of moves unrestricted)
         allow = (lambda game, ps: None if rng.random() < a.hole_free_eps else
                  [p for p in ps if game.features(p).new_enclosed <= 0]) if temperature > 0 else None
-        return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow)
+        return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow,
+                         explore=a.explore, top_k=a.top_k)
 
     feed = live.Feed()   # every move played here also goes to the stream screen
 
@@ -460,6 +461,8 @@ def main(argv=None):
     ap.add_argument("--episodes", type=int, default=16)
     ap.add_argument("--max_pieces", type=int, default=400, help="per collection episode (long enough to also meet deaths)")
     ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--explore", type=float, default=0.15, help="practice: share of moves that explore; the others play Kev's best allowed move")
+    ap.add_argument("--top_k", type=int, default=3, help="practice: an exploring move samples among Kev's k likeliest allowed moves")
     ap.add_argument("--hole_free_eps", type=float, default=0.05, help="practice: share of moves sampled without the no-new-hole restriction")
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
