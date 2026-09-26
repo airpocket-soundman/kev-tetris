@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import generations, kevenv, live, proc, replays
+from . import generations, kevenv, live, proc, replays, teacher
 from .interface import to_record
 from .policy import KevPolicy, KevServer
 from .tetris import RULES, Game, board_features
@@ -111,6 +111,8 @@ class Step:
     phi_after: float = 0.0
     tetris: bool = False
     new_enclosed: int = 0
+    teacher_record: dict | None = None   # the same position labelled with the lookahead search's move
+    agrees: bool = True                  # the search picked the move that was played
 
 
 @dataclass
@@ -167,7 +169,7 @@ def value_features(f: dict) -> list[float]:
             f["hole_depth"], f["hole_rows"]]
 
 
-def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None) -> Episode:
+def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None, search=None) -> Episode:
     """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it.
     board: a starting board (a Tetris drill) instead of an empty one."""
     game, ep = Game(seed=seed), Episode(seed)
@@ -177,6 +179,11 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         placements = game.placements()
         d = policy.decide(game)
         rec = to_record(game, placements, d.placement.key)
+        t_rec, agrees = None, True
+        if search:   # the teacher's move for this position (expert iteration): same request, another label
+            key = search(game, placements)
+            agrees = key == d.placement.key
+            t_rec = rec if agrees else {**rec, "questions": {"move": {**rec["questions"]["move"], "label": key}}}
         before = board_features(game.board)
         pre, piece = [row[:] for row in game.board], game.current
         cleared = game.step(d.placement)
@@ -184,7 +191,8 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         after = board_features(game.board)
         ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b), value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
-                             new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0))
+                             new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0,
+                             teacher_record=t_rec, agrees=agrees))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
@@ -431,9 +439,20 @@ def run_loop(a, ctl: Control):
                     feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
                                   "max_pieces": a.max_pieces, "training_gen": g}, ev)
                 drill = make_drill(rng) if a.drill_frac and rng.random() < a.drill_frac else None
-                eps.append(play_episode(pol, rng.randrange(1 << 30), a.max_pieces, on_step, on_move, board=drill))
+                search = (lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
+                                                                potential, a.teacher_first_k)) if a.teacher and not a.demo else None
+                eps.append(play_episode(pol, rng.randrange(1 << 30), a.max_pieces, on_step, on_move, board=drill, search=search))
         steps = assign_window_advantages(eps, a.window)
-        recs = select_records(steps, a.keep_frac)
+        if a.teacher and not a.demo:
+            # expert iteration: the search's moves on the positions Kev reached, disagreements first (they teach most)
+            fits = lambda s: s.teacher_record and len(json.dumps(s.teacher_record)) <= MAX_RECORD_CHARS
+            pool = [s for s in steps if fits(s)]
+            diff = [s.teacher_record for s in pool if not s.agrees]; same = [s.teacher_record for s in pool if s.agrees]
+            rng.shuffle(diff); rng.shuffle(same)
+            recs = (diff + same[:max(0, a.teacher_cap // 4)])[:a.teacher_cap]
+            print(f"[gen {g}] teacher: {len(diff)} disagreements, {len(same)} agreements", flush=True)
+        else:
+            recs = select_records(steps, a.keep_frac)
         data = data_dir / f"gen-{g:03d}.jsonl"
         data.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in recs), encoding="utf-8")
 
@@ -498,6 +517,9 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
+    ap.add_argument("--teacher", type=int, choices=[0, 1], default=1, help="train on a two-piece lookahead search's moves (v4 part 2)")
+    ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
+    ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
     ap.add_argument("--elite_games", type=int, default=2, help="practice games per generation whose good moves join the elite set")
     ap.add_argument("--elite_cap", type=int, default=600, help="records kept in the elite set")
     ap.add_argument("--gamma", type=float, default=0.97)
