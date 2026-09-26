@@ -62,8 +62,12 @@ class KevSearchPolicy:
              for (p, _, _, r, _), v in zip(cands, values)]
         best = cands[max(range(len(q)), key=q.__getitem__)][0]
         chosen = best
-        if self.rng.random() < self.explore and len(cands) > 1:    # explore among the searched moves
-            chosen = self.rng.choice([c[0] for c in cands])
+        if self.rng.random() < self.explore and len(cands) > 1:
+            # explore like the plain practice policy: among Kev's 3 likeliest moves, by p^(1/0.7). Uniform over the top 4
+            # (gen 28) played too many poor 4th choices: practice games died after ~70 pieces
+            few = [c[0] for c in cands[:3]]
+            w = [max(probs.get(p.key, 0.0), 1e-9) ** (1 / 0.7) for p in few]
+            chosen = self.rng.choices(few, weights=w)[0]
         d = Decision(chosen, probs, resp.get("latency_ms", (time.perf_counter() - t0) * 1000))
         d.label, d.kev_choice = best.key, kev_choice.key           # train towards the search's choice
         return d
