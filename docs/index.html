@@ -88,8 +88,8 @@
 
   <section>
     <div class="grid" style="margin-top:28px">
-      <div class="card kpi"><div class="v" id="k1">-</div><div class="l" id="k1l">最高の平均得点</div></div>
-      <div class="card kpi"><div class="v" id="k2">-</div><div class="l">学習前(第0世代)からの、最高の平均得点の伸び</div></div>
+      <div class="card kpi"><div class="v" id="k1">-</div><div class="l" id="k1l">1ミノあたり得点(最高)</div></div>
+      <div class="card kpi"><div class="v" id="k2">-</div><div class="l">学習前(第0世代)からの、1ミノあたり得点の伸び</div></div>
       <div class="card kpi"><div class="v" id="k3">-</div><div class="l" id="k3l">1ゲームあたりのテトリス(最多)</div></div>
       <div class="card kpi"><div class="v" id="k4">-</div><div class="l" id="k4l">完了した世代数</div></div>
     </div>
@@ -136,10 +136,14 @@
 
   <section id="results">
     <h2>成績の推移</h2>
-    <p>実力テスト(5ゲーム・最大500手・同じブロック順)の平均得点。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統だ。</p>
+    <p>実力テスト(5ゲーム・同じブロック順)の <b>1ミノあたりの得点とライン数</b>。1手あたりの値なので、テストの手数の上限(今は500手)を変えても比べられる。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統、第12世代以降は v3 だ。</p>
     <div class="card">
       <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span><span><i style="background:var(--s3)"></i>報酬 v3(第12世代〜)</span></div>
-      <svg class="chart" id="scoreChart" role="img" aria-label="世代ごとの平均得点"></svg>
+      <svg class="chart" id="scoreChart" role="img" aria-label="世代ごとの1ミノあたり得点"></svg>
+    </div>
+    <div class="card">
+      <div class="legend"><span>1ミノあたりのライン数(最大0.4)</span></div>
+      <svg class="chart" id="lppChart" role="img" aria-label="世代ごとの1ミノあたりライン数" style="height:200px"></svg>
     </div>
     <div class="card">
       <div class="legend"><span>1ゲームあたりのテトリス回数</span></div>
@@ -150,7 +154,7 @@
       <svg class="chart" id="piecesChart" role="img" aria-label="世代ごとの平均手数" style="height:200px"></svg>
     </div>
     <div class="tablewrap"><table id="resultTable">
-      <tr><th>世代</th><th>報酬</th><th>親</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>最大手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
+      <tr><th>世代</th><th>報酬</th><th>親</th><th>得点/ミノ</th><th>ライン/ミノ</th><th>平均得点</th><th>平均ライン</th><th>平均手数</th><th>最大手数</th><th>500手まで生存</th><th>1ラインあたり得点</th><th>テトリス/ゲーム</th><th>所要時間</th></tr>
     </table></div>
     <p class="meta">1ラインあたり得点は、1列消しだけなら100、すべてテトリスなら200。第8世代までのテトリス回数と1ラインあたり得点は、保存済みのテスト録画を再生して数え直した値だ。</p>
     <h3>世代ごとのレポート</h3>
@@ -292,11 +296,11 @@ const tr_ = DATA.training || {};
 document.getElementById("current").textContent = tr_.state === "running" || tr_.state === "paused"
   ? `第${tr_.gen}世代を学習中` : "学習は停止中";
 if (GENS.length) {
-  const best = GENS.reduce((a, b) => (b.score > a.score ? b : a));
+  const best = GENS.reduce((a, b) => (b.spp > a.spp ? b : a));
   const most = GENS.reduce((a, b) => (b.tetris > a.tetris ? b : a));
-  document.getElementById("k1").textContent = fmt(Math.round(best.score));
-  document.getElementById("k1l").textContent = `最高の平均得点(第${best.gen}世代・${best.reward})`;
-  document.getElementById("k2").textContent = "× " + Math.round(best.score / GENS[0].score);
+  document.getElementById("k1").textContent = best.spp.toFixed(1) + " 点";
+  document.getElementById("k1l").textContent = `1ミノあたり得点(最高: 第${best.gen}世代・${best.reward})`;
+  document.getElementById("k2").textContent = "× " + (best.spp / GENS[0].spp).toFixed(1);
   document.getElementById("k3").textContent = most.tetris.toFixed(1) + " 回";
   document.getElementById("k3l").textContent = `1ゲームあたりのテトリス(最多: 第${most.gen}世代)`;
   document.getElementById("k4").textContent = GENS.length + " 世代";
@@ -307,7 +311,7 @@ const table = document.getElementById("resultTable");
 for (const g of GENS) {
   const tr = document.createElement("tr");
   tr.innerHTML = `<td>第${g.gen}世代</td><td>${g.reward === "-" ? "学習前" : `<span class="tag ${g.reward}">${g.reward}</span>`}</td>
-    <td>${g.parent == null ? "-" : "第" + g.parent + "世代"}</td><td class="num">${fmt(Math.round(g.score))}</td><td class="num">${g.lines}</td>
+    <td>${g.parent == null ? "-" : "第" + g.parent + "世代"}</td><td class="num">${(g.spp ?? 0).toFixed(1)}</td><td class="num">${(g.lpp ?? 0).toFixed(3)}</td><td class="num">${fmt(Math.round(g.score))}</td><td class="num">${g.lines}</td>
     <td class="num">${g.pieces}</td><td class="num">${fmt(g.best_pieces)}</td><td class="num">${g.survived}/${g.games}</td><td class="num">${g.spl.toFixed(1)}</td>
     <td class="num">${g.tetris.toFixed(1)}</td><td class="num">${g.min == null ? "-" : g.min + "分"}</td>`;
   table.appendChild(tr);
@@ -315,7 +319,8 @@ for (const g of GENS) {
 document.getElementById("reports").innerHTML = [...GENS].reverse()
   .map(g => `<li><b>第${g.gen}世代 <span class="meta">${g.created || ""}</span></b>${g.report}</li>`).join("");
 
-function bars(svg, key, niceSteps, label) {
+function bars(svg, key, niceSteps, label, digits = null) {
+  const num = v => digits == null ? fmt(v) : Number(v).toFixed(digits);
   const W = svg.clientWidth, H = svg.clientHeight, m = { l: 56, r: 12, t: 22, b: 26 };
   const top = Math.max(...GENS.map(g => g[key])) || 1;
   const step = niceSteps.find(v => top / v <= 4) || niceSteps[niceSteps.length - 1];
@@ -323,19 +328,20 @@ function bars(svg, key, niceSteps, label) {
   const bw = (W - m.l - m.r) / GENS.length;
   const y = v => H - m.b - (H - m.t - m.b) * v / yMax;
   let s = "";
-  for (let v = 0; v <= yMax; v += step)
-    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  for (let i = 0, v = 0; v <= yMax + 1e-9; i++, v = +(i * step).toFixed(6))
+    s += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${m.l - 8}" y="${y(v) + 4}" text-anchor="end">${num(v)}</text>`;
   GENS.forEach((g, i) => {
     const x = m.l + i * bw + bw * 0.18, w = bw * 0.64, h = Math.max(0, y(0) - y(g[key]));
-    s += `<rect x="${x}" y="${y(g[key])}" width="${w}" height="${h}" rx="4" fill="${colorOf(g)}"><title>第${g.gen}世代: ${label} ${fmt(g[key])}</title></rect>`;
-    s += `<text x="${x + w / 2}" y="${y(g[key]) - 6}" text-anchor="middle">${fmt(g[key])}</text>`;
+    s += `<rect x="${x}" y="${y(g[key])}" width="${w}" height="${h}" rx="4" fill="${colorOf(g)}"><title>第${g.gen}世代: ${label} ${num(g[key])}</title></rect>`;
+    s += `<text x="${x + w / 2}" y="${y(g[key]) - 6}" text-anchor="middle">${num(g[key])}</text>`;
     s += `<text x="${x + w / 2}" y="${H - 8}" text-anchor="middle">${g.gen}</text>`;
   });
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.innerHTML = s;
 }
 function draw() {
-  bars(document.getElementById("scoreChart"), "score", [1000, 2000, 5000, 10000, 20000], "平均得点");
+  bars(document.getElementById("scoreChart"), "spp", [5, 10, 20], "得点/ミノ", 1);
+  bars(document.getElementById("lppChart"), "lpp", [0.05, 0.1, 0.2], "ライン/ミノ", 3);
   bars(document.getElementById("tetrisChart"), "tetris", [0.5, 1, 2, 5], "テトリス/ゲーム");
   bars(document.getElementById("piecesChart"), "pieces", [100, 250], "平均手数");
 }

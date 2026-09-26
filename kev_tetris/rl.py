@@ -256,6 +256,9 @@ def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen
             "best_score": max(e.score for e in eps), "max_pieces": max_pieces,
             # how well lines are cleared, whatever the length of the games: 100 = only singles, 200 = only Tetrises
             "score_per_line": round(sum(e.score for e in eps) / max(1, sum(e.lines for e in eps)), 1),
+            # per piece: comparable across test caps (the survivors of a capped game count at the cap)
+            "score_per_piece": round(sum(e.score for e in eps) / max(1, sum(e.pieces for e in eps)), 2),
+            "lines_per_piece": round(sum(e.lines for e in eps) / max(1, sum(e.pieces for e in eps)), 4),
             "mean_tetrises": round(statistics.mean(e.tetrises for e in eps), 2)}
 
 

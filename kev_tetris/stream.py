@@ -279,7 +279,9 @@ def gen_info(entry, gens):
     prev = next((g for g in gens if g["gen"] == entry.get("parent")), None)
     ev, pev = entry.get("eval") or {}, (prev or {}).get("eval") or {}
     return {"gen": entry["gen"], "model": entry.get("model", "Kev"), "run": entry["run"], "train": entry.get("train"),
-            "eval": ev, "delta_score": round(ev["mean_score"] - pev["mean_score"]) if ev and pev else None,
+            "eval": ev, "spp": round(ev["mean_score"] / ev["mean_pieces"], 1) if ev.get("mean_pieces") else None,
+            "delta_spp": round(ev["mean_score"] / ev["mean_pieces"] - pev["mean_score"] / pev["mean_pieces"], 1)
+            if ev.get("mean_pieces") and pev.get("mean_pieces") else None,
             "cumulative_episodes": sum((g.get("train") or {}).get("episodes", 0) for g in gens if g["gen"] <= entry["gen"]),
             "total_gens": len(gens), "latest": entry["gen"] == max(g["gen"] for g in gens)}
 
@@ -454,7 +456,7 @@ def main(argv=None):
     ap.add_argument("--train_launcher", choices=["local", "docker"], default="local", help="where 学習開始 starts the loop: this Python, or the kev service of docker-compose.yml")
     ap.add_argument("--train_args", default="--generations 0", help="arguments for kev_tetris.rl when the control page starts training")
     ap.add_argument("--pieces_per_gen", type=int, default=150, help="a generation's turn ends after this many pieces (or game over)")
-    ap.add_argument("--relay_interval", type=float, default=0.5, help="seconds between relayed training moves (lower = smoother, heavier for OBS)")
+    ap.add_argument("--relay_interval", type=float, default=0.35, help="seconds between relayed training moves (lower = smoother, heavier for OBS)")
     ap.add_argument("--move_delay", type=float, default=0.18, help="seconds per move, so viewers can follow")
     ap.add_argument("--pause", type=float, default=3.0, help="seconds to show a generation's result before the switch")
     ap.add_argument("--need_serve_gb", type=float, default=10.0, help="auto: start a generation's own Kev server only with this much free GPU memory, else replay (~3 for Kev-0.8B)")

@@ -143,6 +143,18 @@ def _best_score(g: dict):
     return max((r["score"] for r in games), default=None)
 
 
+def per_piece(g: dict) -> dict:
+    """Score and lines per piece: the mean over the test games (total / total) and the best single game."""
+    ev = g.get("eval") or {}
+    if not ev.get("mean_pieces"): return {}
+    games = replays.load(g["gen"])
+    out = {"spp": round(ev["mean_score"] / ev["mean_pieces"], 2), "lpp": round(ev["mean_lines"] / ev["mean_pieces"], 4)}
+    if games:
+        out["best_spp"] = round(max(r["score"] / max(1, r["pieces"]) for r in games), 2)
+        out["best_lpp"] = round(max(r["lines"] / max(1, r["pieces"]) for r in games), 4)
+    return out
+
+
 def _best_pieces(g: dict):
     """The longest test game (pieces placed), from the recordings; the test stops at its max_pieces (500)."""
     games = replays.load(g["gen"]) if g.get("eval") else []
@@ -155,4 +167,5 @@ def gens_event(gens: list[dict] | None = None) -> dict:
     return {"gens": [{"gen": g["gen"], "mean_lines": (g.get("eval") or {}).get("mean_lines"),
                       "best_lines": (g.get("eval") or {}).get("best_lines"),
                       "mean_score": (g.get("eval") or {}).get("mean_score"), "best_score": _best_score(g),
-                      "mean_pieces": (g.get("eval") or {}).get("mean_pieces"), "best_pieces": _best_pieces(g)} for g in gens]}
+                      "mean_pieces": (g.get("eval") or {}).get("mean_pieces"), "best_pieces": _best_pieces(g),
+                      **per_piece(g)} for g in gens]}

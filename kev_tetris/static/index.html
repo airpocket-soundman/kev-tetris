@@ -143,15 +143,15 @@
         <dt>AIモデル</dt><dd id="model">-</dd>
         <dt>これまでの練習</dt><dd id="practice">-</dd>
         <dt>学習した手</dt><dd id="learned">-</dd>
-        <dt>テスト平均</dt><dd><span id="evalv">-</span> <span id="delta" class="delta"></span></dd>
+        <dt>1ミノあたり得点</dt><dd><span id="evalv">-</span> <span id="delta" class="delta"></span></dd>
       </dl>
     </div>
     <div class="panel" id="chartpanel">
       <div class="label">世代ごとのテスト成績(1ゲーム最大500手)</div>
       <div id="legend"><span><i style="background:var(--s-mean)"></i>平均</span><span><i style="background:var(--s-best)"></i>最高</span></div>
-      <div class="csub">ゲームの得点</div>
+      <div class="csub">1ミノあたりの得点</div>
       <div class="chart" id="chartScore"></div>
-      <div class="csub">消したライン数</div>
+      <div class="csub">1ミノあたりのライン数(最大0.4)</div>
       <div class="chart" id="chartLines"></div>
       <div class="csub">生き残った手数(上限500)</div>
       <div class="chart" id="chartPieces"></div>
@@ -258,18 +258,19 @@ function showGen(g) {
   $("tags").innerHTML = tags.join("");
   $("practice").textContent = g.cumulative_episodes ? `${fmt(g.cumulative_episodes)} ゲーム` : "まだなし";
   $("learned").textContent = g.train ? `${fmt(g.train.trained_on ?? g.train.records)} 手` : "まだなし";
-  $("evalv").textContent = g.eval && g.eval.mean_score != null ? `${fmt(Math.round(g.eval.mean_score))} 点` : "-";
+  $("evalv").textContent = g.spp != null ? `${g.spp.toFixed(1)} 点` : "-";
   const d = $("delta");
-  if (g.delta_score == null) { d.textContent = ""; d.className = "delta"; }
-  else { d.textContent = `(前世代 ${g.delta_score >= 0 ? "+" : ""}${fmt(g.delta_score)})`; d.className = "delta " + (g.delta_score >= 0 ? "up" : "down"); }
+  if (g.delta_spp == null) { d.textContent = ""; d.className = "delta"; }
+  else { d.textContent = `(前世代 ${g.delta_spp >= 0 ? "+" : ""}${g.delta_spp.toFixed(1)})`; d.className = "delta " + (g.delta_spp >= 0 ? "up" : "down"); }
   drawChart();
 }
 function drawChart() {
-  plot($("chartScore"), "mean_score", "best_score", [100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 50000], 400, false);
-  plot($("chartLines"), "mean_lines", "best_lines", [1, 2, 5, 10, 20, 25, 50, 100, 200, 500], 4, false);
+  plot($("chartScore"), "spp", "best_spp", [5, 10, 20, 25, 50], 40, false, 1);
+  plot($("chartLines"), "lpp", "best_lpp", [0.05, 0.1, 0.2], 0.4, false, 2);
   plot($("chartPieces"), "mean_pieces", "best_pieces", [50, 100, 250], 100, true);
 }
-function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels) {
+function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels, digits = 0) {
+  const num = v => digits ? Number(v).toFixed(digits) : fmt(Math.round(v));
   const W = el.clientWidth, H = el.clientHeight;
   const gens = state.gens.filter(g => g[meanKey] != null);
   if (!W || !H) return;
@@ -281,8 +282,8 @@ function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels) {
   const x = g => m.l + (W - m.l - m.r) * (maxGen === minGen ? 0.5 : (g - minGen) / (maxGen - minGen));
   const y = v => H - m.b - (H - m.t - m.b) * v / yMax;
   let svg = "";
-  for (let v = 0; v <= yMax; v += stepY)
-    svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l - 10}" y="${y(v) + 6}" text-anchor="end">${fmt(v)}</text>`;
+  for (let i = 0, v = 0; v <= yMax + 1e-9; i++, v = +(i * stepY).toFixed(6))
+    svg += `<line x1="${m.l}" x2="${W - m.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)" stroke-width="1"/><text x="${m.l - 10}" y="${y(v) + 6}" text-anchor="end">${num(v)}</text>`;
   if (xLabels) {
     const every = maxGen - minGen > 10 ? 2 : 1;
     for (let g = minGen; g <= maxGen; g += every) svg += `<text x="${x(g)}" y="${H - 6}" text-anchor="middle">${g}</text>`;
@@ -293,7 +294,7 @@ function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels) {
     if (pts.length > 1) svg += `<polyline fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(g => `${x(g.gen)},${y(g[key])}`).join(" ")}"/>`;
     for (const g of pts) svg += `<circle cx="${x(g.gen)}" cy="${y(g[key])}" r="${g.gen === now ? 7 : 5}" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
     const last = pts[pts.length - 1];   // direct label on the latest point only
-    if (last) svg += `<text class="val" x="${x(last.gen) + 12}" y="${y(last[key]) + 6}">${fmt(Math.round(last[key]))}</text>`;
+    if (last) svg += `<text class="val" x="${x(last.gen) + 12}" y="${y(last[key]) + 6}">${num(last[key])}</text>`;
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>`;
 }
@@ -373,7 +374,16 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function animate(m) {
   showStats(m); showThinking(m);
   if (!m.piece) { drawBoard(m.board); return; }
-  if (m.turn_text) { drawBoard(m.post); return; }   // relayed training games: one draw per move, no animation (keeps OBS light)
+  if (m.turn_text) {   // relayed training games: the piece at the top, where it lands (highlighted), then the result
+    const quick = moves.length > 2;
+    const shape = SHAPES[m.piece], w = Math.max(...shape.map(c => c[0])) + 1, sx = Math.floor((W - w) / 2);
+    drawBoard(m.board, () => { for (const [x, y] of shape) cell(bctx, sx + x, y, COLORS[m.color]); });
+    await sleep(quick ? 30 : 110);
+    drawBoard(m.board, () => { for (const [x, y] of m.cells) cell(bctx, x, y, COLORS[m.color]); outline(bctx, m.cells, "#ffffff", 3); });
+    await sleep(quick ? 30 : 110);
+    drawBoard(m.post);
+    return;
+  }
   const fast = moves.length > 2 ? 0.3 : 1;
   const alt = (m.thinking || []).filter(c => !c.chosen).map(c => c.cells);
   drawBoard(m.board, () => alt.forEach(cs => outline(bctx, cs, "rgba(142,152,196,.7)", 2)));

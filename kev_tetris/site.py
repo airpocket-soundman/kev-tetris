@@ -11,7 +11,7 @@ from __future__ import annotations
 import json, subprocess, sys, time
 from pathlib import Path
 
-from . import generations, replays
+from . import generations, progress, replays
 from .tetris import Game
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -37,11 +37,12 @@ def _recount(gen: int) -> dict:
 def _report(g: dict, parent: dict | None) -> str:
     """A few plain sentences on one generation, compared with its parent."""
     lineage = "学習前" if g["reward"] == "-" else f"報酬 {g['reward']}、親は第{g['parent']}世代"
-    s = [f"第{g['gen']}世代({lineage})。平均得点 {g['score']:,.0f}、平均 {g['pieces']:.0f} 手(最大 {g['best_pieces']} 手、"
-         f"500手到達 {g['survived']}/{g['games']})、テトリス {g['tetris']:.1f} 回/ゲーム、1ラインあたり {g['spl']:.1f} 点。"]
+    s = [f"第{g['gen']}世代({lineage})。1ミノあたり {g.get('spp', 0):.1f} 点・{g.get('lpp', 0):.3f} ライン、"
+         f"平均 {g['pieces']:.0f} 手(最大 {g['best_pieces']} 手、上限到達 {g['survived']}/{g['games']})、"
+         f"テトリス {g['tetris']:.1f} 回/ゲーム、1ラインあたり {g['spl']:.1f} 点。"]
     if parent:
-        d = g["score"] - parent["score"]
-        s.append(f"親の第{parent['gen']}世代と比べて、平均得点は {'+' if d >= 0 else ''}{d:,.0f}。")
+        d = g.get("spp", 0) - parent.get("spp", 0)
+        s.append(f"親の第{parent['gen']}世代と比べて、1ミノあたりの得点は {'+' if d >= 0 else ''}{d:.1f}。")
         notes = []
         if g["pieces"] < parent["pieces"] * 0.8: notes.append("生き残る手数が大きく減った")
         elif g["pieces"] > parent["pieces"] * 1.2: notes.append("生き残る手数が大きく伸びた")
@@ -65,7 +66,7 @@ def build() -> dict:
                      "score": ev.get("mean_score"), "best_score": ev.get("best_score"), "lines": ev.get("mean_lines"),
                      "pieces": ev.get("mean_pieces"), "best_pieces": c.get("best_pieces"), "survived": c.get("survived", 0),
                      "games": c.get("games", ev.get("games", 5)), "spl": c.get("spl", 0.0), "tetris": c.get("tetris", 0.0),
-                     "min": (e.get("train") or {}).get("minutes"), "created": e.get("created")})
+                     "min": (e.get("train") or {}).get("minutes"), "created": e.get("created"), **progress.per_piece(e)})
     by_gen = {r["gen"]: r for r in rows}
     for r in rows: r["report"] = _report(r, by_gen.get(r["parent"]))
     CACHE.parent.mkdir(parents=True, exist_ok=True)
