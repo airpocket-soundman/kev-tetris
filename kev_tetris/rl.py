@@ -39,7 +39,7 @@ LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
 # v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
-LINE_REWARD_CLEAN = {0: 0.0, 1: -1.0, 2: -1.0, 3: -0.5, 4: 16.0}
+LINE_REWARD_CLEAN = {0: 0.0, 1: -3.0, 2: -3.0, 3: -1.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
 STATUS = ROOT / "runs" / "rl_status.json"     # written here, read by the control page and the stream screen
@@ -150,9 +150,11 @@ def danger_height() -> int:
 def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bool = False, b2b: int = 0) -> float:
     v5 = REWARD_VERSION == "v5"
     if v5:
-        clean = before["enclosed"] + before["overhang"] == 0 and before["extra_wells"] == 0
-        # clean and low: Tetrises only. Holes or a second well: every clear helps dig out (full line rewards)
-        r = (LINE_REWARD_CLEAN if clean and before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
+        # low board: Tetrises only, unless the clear repairs something - fewer holes/overhangs, shallower buried holes,
+        # or a second well filled (a shallow dip alone made gen 37's boards "unclean" and paid for plain singles)
+        repairs = (after["enclosed"] + after["overhang"] < before["enclosed"] + before["overhang"]
+                   or after["hole_depth"] < before["hole_depth"] or after["extra_wells"] < before["extra_wells"])
+        r = (LINE_REWARD_CLEAN if before["max_height"] <= SAFE_HEIGHT and not repairs else LINE_REWARD)[cleared] + 0.05
     if REWARD_VERSION in ("v4", "v5"):
         if not v5: r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
         if cleared and b2b >= 2: r += 8.0                  # back-to-back Tetris / T-spin clear
