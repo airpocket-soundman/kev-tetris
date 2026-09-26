@@ -33,11 +33,13 @@ from .tetris import RULES, Game, board_features
 ROOT = Path(__file__).resolve().parent.parent
 # reward "v2": a Tetris is worth twice the game's own ratio (1/3/5/8), and stack height is not penalised: building for
 # a Tetris means stacking high on purpose. Records from different reward versions are never trained on together.
-REWARD_VERSION = "v4"   # v4: v3 + Cold Clear style line rewards, B2B, T-spins, Dellacherie/BCTS potential, elite games (docs/plan.md 5.7)
+REWARD_VERSION = "v5"   # v5 (gen 37): holes and second wells first, then Tetrises only (docs/plan.md 5.8c).  v4: v3 + Cold Clear style line rewards, B2B, T-spins, Dellacherie/BCTS potential, elite games (docs/plan.md 5.7)
 LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 # v4 (Cold Clear style): while the stack is safe, singles and doubles are worth little - build for a Tetris instead
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
+# v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
+LINE_REWARD_CLEAN = {0: 0.0, 1: -1.0, 2: -1.0, 3: -0.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
 STATUS = ROOT / "runs" / "rl_status.json"     # written here, read by the control page and the stream screen
@@ -142,25 +144,33 @@ DANGER_HEIGHT_V4 = 12  # v4 (from gen 15): gen 14 stacked to 18-20 around severa
 
 
 def danger_height() -> int:
-    return DANGER_HEIGHT_V4 if REWARD_VERSION == "v4" else DANGER_HEIGHT
+    return DANGER_HEIGHT_V4 if REWARD_VERSION in ("v4", "v5") else DANGER_HEIGHT
 
 
 def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bool = False, b2b: int = 0) -> float:
-    if REWARD_VERSION == "v4":
-        r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
+    v5 = REWARD_VERSION == "v5"
+    if v5:
+        clean = before["enclosed"] + before["overhang"] == 0 and before["extra_wells"] == 0
+        # clean and low: Tetrises only. Holes or a second well: every clear helps dig out (full line rewards)
+        r = (LINE_REWARD_CLEAN if clean and before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
+    if REWARD_VERSION in ("v4", "v5"):
+        if not v5: r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
         if cleared and b2b >= 2: r += 8.0                  # back-to-back Tetris / T-spin clear
         if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
         # holes and overhangs cost every move they stay (gen 17: 0.15, gen 19: 0.35): repair them at once, then build
-        r -= 0.35 * (after["enclosed"] + after["overhang"])
+        r -= (0.6 if v5 else 0.35) * (after["enclosed"] + after["overhang"])
+        if v5:   # a second well (or a 2-3 wide dip) costs every move it stays; filling it pays
+            r -= 0.1 * after["extra_wells"]
+            r += 0.3 * max(0, before["extra_wells"] - after["extra_wells"])
         # above half the board: survive first - lowering the stack pays (from gen 19)
         if before["max_height"] > SURVIVE_HEIGHT: r += 0.6 * max(0, before["max_height"] - after["max_height"])
     else:
         r = LINE_REWARD[cleared] + 0.05
-    r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
-    r -= (0.8 if REWARD_VERSION == "v4" else 0.5) * max(0, after["overhang"] - before["overhang"])   # a slide can still fill it
+    r -= (1.5 if v5 else 1.0) * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
+    r -= (1.2 if v5 else 0.8 if REWARD_VERSION == "v4" else 0.5) * max(0, after["overhang"] - before["overhang"])   # a slide can still fill it
     # resolved: filled by a slide, or uncovered because the rows above cleared. Less than the penalty, so creating a
     # hole and filling it again never pays
-    r += 0.8 * max(0, (before["enclosed"] + before["overhang"]) - (after["enclosed"] + after["overhang"]))
+    r += (1.0 if v5 else 0.8) * max(0, (before["enclosed"] + before["overhang"]) - (after["enclosed"] + after["overhang"]))
     r -= 0.5 * max(0, after["max_height"] - danger_height())
     if died: r -= 10.0
     return r
@@ -170,12 +180,12 @@ def potential(f: dict) -> float:
     """How good a board is, for the window credit: few holes, rows ready for a Tetris, a well (capped at 4 deep)."""
     phi = -1.0 * f["enclosed"] - 0.5 * f["overhang"] + 0.3 * f["ready_rows"] + 0.2 * min(f["max_well"], 4) \
         - 0.5 * max(0, f["max_height"] - danger_height())
-    if REWARD_VERSION == "v4":   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
+    if REWARD_VERSION in ("v4", "v5"):   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
         phi -= 0.1 * f["row_transitions"] + 0.1 * f["col_transitions"] + 0.2 * f["hole_depth"] + 0.5 * f["hole_rows"]
         phi -= 0.5 * f["overhang"]                                            # overhangs weigh -1.0 in all (gen 19)
         phi -= 0.08 * max(0, f["max_height"] - SURVIVE_HEIGHT) ** 2           # "survive first" above half the board
         # one well for the I piece; every other well is a liability that grows fast with its depth (gen 18: two-well towers)
-        phi -= 0.15 * f["extra_wells"]
+        phi -= (0.3 if REWARD_VERSION == "v5" else 0.15) * f["extra_wells"]
     return phi
 
 
