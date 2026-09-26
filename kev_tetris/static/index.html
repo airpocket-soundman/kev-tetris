@@ -383,8 +383,11 @@ async function animate(m) {
   if (m.turn_text) {   // relayed training games: the piece at the top, where it lands (highlighted), then the result
     const quick = moves.length > 2;
     const shape = SHAPES[m.piece], w = Math.max(...shape.map(c => c[0])) + 1, sx = Math.floor((W - w) / 2);
-    drawBoard(m.board, () => { for (const [x, y] of shape) cell(bctx, sx + x, y, COLORS[m.color]); });
-    await sleep(quick ? 30 : 110);
+    // the piece really appears in the hidden rows above the field: show it at the top only where the field is empty there
+    if (shape.every(([x, y]) => !m.board[y][sx + x])) {
+      drawBoard(m.board, () => { for (const [x, y] of shape) cell(bctx, sx + x, y, COLORS[m.color]); });
+      await sleep(quick ? 30 : 110);
+    }
     drawBoard(m.board, () => { for (const [x, y] of m.cells) cell(bctx, x, y, COLORS[m.color]); outline(bctx, m.cells, "#ffffff", 3); });
     await sleep(quick ? 30 : 110);
     drawBoard(m.post);
@@ -397,6 +400,8 @@ async function animate(m) {
   const minY = Math.min(...m.cells.map(c => c[1])), steps = 6;
   for (let i = 0; i <= steps; i++) {
     const dy = Math.round(-(minY + 1) * (1 - i / steps));
+    // a frame that would draw over the stack is skipped: the piece did not fall straight there (a slide or a spin)
+    if (m.cells.some(([x, y]) => y + dy >= 0 && m.board[y + dy][x])) continue;
     drawBoard(m.board, () => { for (const [x, y] of m.cells) if (y + dy >= 0) cell(bctx, x, y + dy, COLORS[m.color]); });
     await sleep(7 * fast);
   }
