@@ -28,9 +28,14 @@ class KevSearchPolicy:
         self.value_scale = max(1e-6, value_scale)   # return units per nat of Kev's move prior (PUCT-like anchor)
 
     def _ask(self, req: dict) -> dict:
-        r = urllib.request.Request(f"{self.base_url}/v1/systemone", json.dumps(req).encode(), {"content-type": "application/json"})
-        with urllib.request.urlopen(r, timeout=self.timeout) as resp:
-            return json.load(resp)
+        from .policy import GATE
+        GATE.before()
+        try:
+            r = urllib.request.Request(f"{self.base_url}/v1/systemone", json.dumps(req).encode(), {"content-type": "application/json"})
+            with urllib.request.urlopen(r, timeout=self.timeout) as resp:
+                return json.load(resp)
+        finally:
+            GATE.done()
 
     def decide(self, game: Game) -> Decision:
         t0 = time.perf_counter()

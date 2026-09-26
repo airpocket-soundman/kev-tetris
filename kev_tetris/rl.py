@@ -26,7 +26,7 @@ import numpy as np
 
 from . import generations, kevenv, live, proc, replays, teacher
 from .interface import VALUE_QUESTION, to_record, to_value_request
-from .policy import KevPolicy, KevServer
+from .policy import GATE, KevPolicy, KevServer, is_front, set_front
 from .search import KevSearchPolicy, rollout_label
 from .tetris import RULES, Game, board_features
 
@@ -361,9 +361,12 @@ def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen
 
     def job(i, s):
         def run():
-            show.start(i)
+            show.start(i); set_front(show.shown(i))
+            def step(game, d):
+                set_front(show.shown(i))
+                if on_step: on_step(i, game)
             try:
-                return play_episode(make(), s, max_pieces, (lambda game, d: on_step(i, game)) if on_step else None,
+                return play_episode(make(), s, max_pieces, step,
                                     (lambda ev: on_move(i, ev) if show.shown(i) else None) if on_move else None)
             finally:
                 show.end(i)
@@ -617,7 +620,8 @@ def run_loop(a, ctl: Control):
 
             def search(game, ps, d=None):
                 # RL: on a share of the positions Kev's own rollouts pick the label (beyond the teacher); elsewhere the teacher
-                if rl and a.rollout_rate and d is not None and rng_ro.random() < a.rollout_rate:
+                # never on the streamed game: its moves stay as fast as a lone game's
+                if rl and a.rollout_rate and d is not None and not is_front() and rng_ro.random() < a.rollout_rate:
                     key, _ = rollout_label(game, ps, d.probs, srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), potential,
                                            a.rollout_k, a.rollout_depth, a.rollout_n, a.gamma, random.Random(rng_ro.random()))
                     ro["n"] += 1; ro["same"] += key == hand(game, ps)
@@ -628,6 +632,7 @@ def run_loop(a, ctl: Control):
             def practice_job(i, seed, drill, pol):
                 def on_step(game, d):
                     ctl.checkpoint()
+                    set_front(show.shown(i))
                     pieces_now[i] = game.pieces
                     ctl.report(detail=f"練習試合 {len(done)}/{a.episodes} ゲーム完了・{a.parallel}ゲーム同時",
                                progress=min(1.0, sum(min(1.0, p / a.max_pieces) for p in pieces_now.values()) / a.episodes))
@@ -636,7 +641,7 @@ def run_loop(a, ctl: Control):
                         feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
                                       "max_pieces": a.max_pieces, "training_gen": g, "parallel": a.parallel}, ev)
                 def run():
-                    show.start(i)
+                    show.start(i); set_front(show.shown(i))
                     try:
                         ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search, values=rl)
                     finally:

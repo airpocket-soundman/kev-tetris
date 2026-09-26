@@ -5,7 +5,7 @@ model at a time.
 """
 from __future__ import annotations
 
-import json, math, os, random, subprocess, sys, time, urllib.error, urllib.request
+import json, math, os, random, subprocess, sys, threading, time, urllib.error, urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +14,42 @@ from .interface import read_answer, to_request
 from .tetris import Game, Placement
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+_local = threading.local()
+
+
+def set_front(front: bool) -> None:
+    """Marks the calling game thread as the one on the stream screen (or not)."""
+    _local.front = front
+
+
+def is_front() -> bool:
+    return getattr(_local, "front", False)
+
+
+class Gate:
+    """Keeps the streamed game's Kev answers as fast as a lone game's: the other games (and rollouts) send a request
+    only when the streamed game sends one, so they ride in the same batch instead of queueing ahead of it. A request
+    waits at most `timeout` (the streamed game may be thinking, or have just ended)."""
+    def __init__(self, timeout: float = 0.6):
+        self.cv, self.tick, self.timeout, self.enabled = threading.Condition(), 0, timeout, True
+        self.back = threading.Semaphore(1)
+
+    def before(self):
+        if not self.enabled: return
+        with self.cv:
+            if is_front():
+                self.tick += 1; self.cv.notify_all(); return
+            t = self.tick
+            self.cv.wait_for(lambda: self.tick != t, timeout=self.timeout)
+        self.back.acquire()   # released by done(): one request of the other games at a time, queued behind the streamed one
+
+    def done(self):
+        if self.enabled and not is_front(): self.back.release()
+
+
+GATE = Gate()
 
 
 @dataclass
@@ -39,9 +75,13 @@ class KevPolicy:
         placements = game.placements()
         t0 = time.perf_counter()
         body = json.dumps(to_request(game, placements)).encode()
-        req = urllib.request.Request(f"{self.base_url}/v1/systemone", body, {"content-type": "application/json"})
-        with urllib.request.urlopen(req, timeout=self.timeout) as r:
-            resp = json.load(r)
+        GATE.before()
+        try:
+            req = urllib.request.Request(f"{self.base_url}/v1/systemone", body, {"content-type": "application/json"})
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                resp = json.load(r)
+        finally:
+            GATE.done()
         chosen, probs = read_answer(resp["answers"], placements)
         if self.temperature > 0:
             pool = (self.allow(game, placements) if self.allow else None) or placements
