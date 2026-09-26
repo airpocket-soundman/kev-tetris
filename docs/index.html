@@ -11,19 +11,19 @@
   :root {
     --bg: #f6f7fb; --surface: #ffffff; --surface2: #eef0f7; --line: #d9ddea;
     --text: #151a2e; --muted: #5b6380; --accent: #1668b8;
-    --s1: #1f94c4; --s2: #c77a22; --s3: #9b6bd6; --s4: #3a9a52; --grid: #e3e6f0;
+    --s1: #1f94c4; --s2: #c77a22; --s3: #9b6bd6; --s4: #3a9a52; --s5: #d43d6b; --grid: #e3e6f0;
     --good: #1e7a4c; --warn: #9a5b00;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0b0e1a; --surface: #141a2e; --surface2: #1b2340; --line: #2a3560;
-      --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff;
+      --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff; --s5: #ff6f9c;
       --grid: #232c4d; --good: #6dff9c; --warn: #ffd166;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0b0e1a; --surface: #141a2e; --surface2: #1b2340; --line: #2a3560;
-    --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff;
+    --text: #eef1ff; --muted: #97a0c8; --accent: #5ee7ff; --s5: #ff6f9c;
     --grid: #232c4d; --good: #6dff9c; --warn: #ffd166;
   }
   * { box-sizing: border-box; }
@@ -54,7 +54,7 @@
   td.num { text-align: right; font-family: "JetBrains Mono", monospace; }
   tr:last-child td { border-bottom: 0; }
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
-  .tag.v1 { border-color: var(--s1); } .tag.v2 { border-color: var(--s2); } .tag.v3 { border-color: var(--s3); } .tag.v4 { border-color: var(--s4); }
+  .tag.v1 { border-color: var(--s1); } .tag.v2 { border-color: var(--s2); } .tag.v3 { border-color: var(--s3); } .tag.v4 { border-color: var(--s4); } .tag.v5 { border-color: var(--s5); }
   .hl { font-weight: 700; color: var(--accent); }
   .chart { width: 100%; height: 280px; }
   .chart text { font-family: "JetBrains Mono", monospace; font-size: 12px; fill: var(--muted); }
@@ -128,25 +128,25 @@
       <tr><td>置き場所の候補</td><td>回転して真下に落とす(第12世代の v3 からは滑り込みも)</td><td>出現位置から左右移動・回転・1段落下でたどり着ける場所すべて</td></tr>
     </table></div>
     <p class="meta">1ミノあたりの成績はルールをまたいでも比べられるが、ルール2の方が厳しい(中央が高くなると終わる)。過去の世代の録画は、記録したときのルールで再生している。</p>
-    <h3>1世代の流れ(第18世代〜)</h3>
+    <h3>1世代の流れ(第37世代〜)</h3>
     <div class="steps">
-      <div class="step"><b><span class="n">1</span>練習試合</b>Kev が16ゲームを打つ(4ゲーム同時、最大400手)。85%は Kev の一番の手、15%は上位3候補から探索。各局面で「先生」(2手先読みの探索)ならどう打つかも記録する</div>
-      <div class="step"><b><span class="n">2</span>学習</b>先生の手を正解として Kev の LoRA とポインタヘッドを追加学習する(<code>kev.train</code>)。先生と Kev の手が食い違った局面を中心に、1世代あたり最大600手+直前の世代の分</div>
-      <div class="step"><b><span class="n">3</span>実力テスト</b>ランダムなしで10ゲーム(1ゲームずつ、毎回同じブロック順、最大500手)。1ミノあたりの得点・ライン数、テトリス回数、生き残った手数で成績を出す</div>
+      <div class="step"><b><span class="n">1</span>練習試合</b>Kev-0.8B が16ゲームを打つ(4ゲーム同時、最大400手)。85%は Kev の一番の手、15%は上位3候補から Kev の確率に応じて探索。局面の6%では、上位3手それぞれを置いたあと Kev 自身にさらに10手打たせ(各2回)、その結果でラベルを決める(ロールアウト)。残りの局面は「先生」(2手先読みの探索)の手をラベルにする</div>
+      <div class="step"><b><span class="n">2</span>学習</b>ロールアウトのラベルを優先し、残りは先生の手を正解として Kev の LoRA とポインタヘッドを追加学習する(<code>kev.train</code>)。先生と Kev の手が食い違った局面を中心に、1世代あたり最大600手+直前の世代の分</div>
+      <div class="step"><b><span class="n">3</span>実力テスト</b>ランダムなしで10ゲーム(1ゲームずつ、毎回同じブロック順、最大1000手)。1ミノあたりの得点・ライン数、テトリス回数、生き残った手数で成績を出す。第37世代より前は500手上限のテストだった</div>
     </div>
-    <p class="meta">「先生」は人間が設計した評価式で2手先まで読むプログラム。第16世代からは、Kev はこの先生の手をまねて学んでいる(模倣学習)。第15世代までは、Kev 自身が試した手を報酬で選んで学ぶ強化学習だった。</p>
+    <p class="meta">「先生」は人間が設計した評価式で2手先まで読むプログラム。第16世代からは、Kev はこの先生の手をまねて学んでいる(模倣学習)。第37世代からは、Kev 自身のロールアウト(自分で先まで打ってみた結果)によるラベルも一部で使い、先生の評価式の上限を超えることを狙う。第15世代までは、Kev 自身が試した手を報酬で選んで学ぶ強化学習だった。</p>
   </section>
 
   <section id="env">
     <h2>モデルと実行環境</h2>
     <div class="tablewrap"><table>
       <tr><th>項目</th><th>内容</th></tr>
-      <tr><td>モデル</td><td>Kev-4B(<code>jaredpalmer/kev-4b</code>)。ベースは Qwen3.5-4B-Base。LoRA とポインタヘッドで選択肢の確率を出す。世代ごとに LoRA とポインタヘッド(約3,380万パラメータ)を追加学習している</td></tr>
+      <tr><td>モデル</td><td>Kev-0.8B(<code>jaredpalmer/kev-0.8b</code>)。第23世代で Kev-4B 第20世代から蒸留し、以後はこちらを使い続けている。LoRA とポインタヘッドで選択肢の確率を出す。世代ごとに LoRA とポインタヘッドを追加学習している</td></tr>
       <tr><td>GPU</td><td>NVIDIA GeForce RTX 5060 Ti(VRAM 16GB)</td></tr>
       <tr><td>実行環境</td><td>Windows 11 + Docker(WSL2 の Linux コンテナ)。学習ループと Kev はコンテナ、配信サーバーは Windows。第10世代までは Windows ネイティブ</td></tr>
-      <tr><td>ソフトウェア</td><td>PyTorch 2.8.0 + CUDA 12.8、bfloat16、flash-linear-attention と causal-conv1d(高速化ライブラリ)。Kev の融合カーネルと CUDA グラフは無効(WSL が落ちる/16GB で不安定なため)</td></tr>
-      <tr><td>速さ</td><td>推論 約318ms/手(Windows 時代は約430ms)。練習試合は4ゲーム同時で約7.5手/秒。1世代 約85〜95分(実力テストを1ゲームずつにしたため)</td></tr>
-      <tr><td>VRAM</td><td>推論 約10GB、学習中 約13GB</td></tr>
+      <tr><td>ソフトウェア</td><td>PyTorch 2.8.0 + CUDA 12.8、bfloat16、flash-linear-attention と causal-conv1d(高速化ライブラリ)。0.8B では CUDA グラフを有効化している</td></tr>
+      <tr><td>速さ</td><td>Kev-0.8B + CUDA グラフで約196ms/手(直列)。4B 時代は推論 約318ms/手(Windows 時代は約430ms)</td></tr>
+      <tr><td>VRAM</td><td>推論 約10GB、学習中 約13GB(4B 時代の値。0.8B ではさらに少ない)</td></tr>
       <tr><td>配信</td><td>ブラウザの配信画面を OBS で取り込み、X に RTMPS で送信</td></tr>
       <tr><td>ライセンス</td><td>Kev と Qwen3.5 は Apache-2.0</td></tr>
     </table></div>
@@ -156,15 +156,15 @@
       <li><b>Kev-4B に変更</b>学習前の時点で平均4ライン・平均46手と、0.8B より明らかに強かった</li>
       <li><b>Docker + 高速化ライブラリへ移行(第11世代〜)</b>推論が約26%短縮、モデルの読み込みは約4分半 → 約16秒</li>
       <li><b>練習試合の並列化(第17世代〜)</b>練習試合が約2.6倍速くなった。実力テストは見る価値があるので1ゲームずつ</li>
-      <li class="todo"><b>Kev-0.8B へ蒸留(準備済み)</b>模倣学習が頭打ちになったら。0.8B では CUDA グラフも有効にして、さらに速く回す</li>
+      <li><b>Kev-0.8B へ蒸留(第23世代〜)</b>4B 第20世代から蒸留。CUDA グラフも有効化し、1手 約196ms(直列)まで速くなった</li>
     </ul>
   </section>
 
   <section id="results">
     <h2>成績の推移</h2>
-    <p>実力テスト(5ゲーム・同じブロック順)の <b>1ミノあたりの得点とライン数</b>。1手あたりの値なので、テストの手数の上限(今は500手)を変えても比べられる。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統、第12世代以降は v3 だ。</p>
+    <p>実力テスト(10ゲーム・同じブロック順)の <b>1ミノあたりの得点とライン数</b>。1手あたりの値なので、テストの手数の上限を変えても比べられる。第7・8世代は v1 の系統、第9世代以降は第6世代から分岐した v2 の系統、第12世代以降は v3、第14世代以降は v4、第37世代以降は v5 だ。テストの手数上限は第37世代から500手 → 1000手に延びたので、平均手数・「生存」列やグラフの見た目は第37世代の前後で単純比較できない(1ミノあたりの値は比較できる)。</p>
     <div class="card">
-      <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span><span><i style="background:var(--s3)"></i>報酬 v3(第12〜13世代、第6世代から分岐)</span><span><i style="background:var(--s4)"></i>報酬 v4(第14世代〜、第12世代から)</span></div>
+      <div class="legend"><span><i style="background:var(--s1)"></i>報酬 v1</span><span><i style="background:var(--s2)"></i>報酬 v2(第6世代から分岐)</span><span><i style="background:var(--s3)"></i>報酬 v3(第12〜13世代、第6世代から分岐)</span><span><i style="background:var(--s4)"></i>報酬 v4(第14〜36世代、第12世代から)</span><span><i style="background:var(--s5)"></i>報酬 v5(第37世代〜)</span></div>
       <svg class="chart" id="scoreChart" role="img" aria-label="世代ごとの1ミノあたり得点"></svg>
     </div>
     <div class="card">
@@ -176,7 +176,7 @@
       <svg class="chart" id="tetrisChart" role="img" aria-label="世代ごとのテトリス回数" style="height:200px"></svg>
     </div>
     <div class="card">
-      <div class="legend"><span>生き残った平均手数(テストの上限は500手)</span></div>
+      <div class="legend"><span>生き残った平均手数(テストの上限は第37世代から1000手、それ以前は500手)</span></div>
       <svg class="chart" id="piecesChart" role="img" aria-label="世代ごとの平均手数" style="height:200px"></svg>
     </div>
     <div class="tablewrap"><table id="resultTable">
@@ -186,13 +186,15 @@
     <h3>世代ごとのレポート</h3>
     <p class="meta">世代の学習が終わるたびに自動で更新される(新しい順)。</p>
     <ul class="timeline" id="reports"></ul>
-    <h3>わかったこと(第20世代時点)</h3>
+    <h3>わかったこと(第36世代時点)</h3>
     <ul>
       <li><b>v1(第1〜8世代)</b>: 生き残る力は大きく伸びた(第6世代で 44.1点/ミノ、5ゲーム中4ゲームが500手の上限まで生存)。ただ、ほぼ1列消しばかりだった</li>
       <li><b>v2(第9〜11世代)</b>: テトリスを狙う報酬にすると、テトリスは増えたが、生き残りが一時落ちた</li>
       <li><b>ルールの変更と v3・v4 前半(第12〜15世代)</b>: 本来のテトリスのルール(出現位置のゲームオーバー、SRS 回転)にすると、それまでのモデルは約80〜150手で負けるようになった。報酬を調整しても、30点/ミノ前後で頭打ちが続いた</li>
       <li><b>先生つき学習(第16世代〜)</b>: 2手先読みの先生の手をまねさせると一気に伸びた。1ミノあたり得点は 29 → 47 → 57 → 50 → 52 → <b>59.6</b>、テトリスは 0.1 → 2.0 → 4.8 → 1.2 → 3.5 → <b>11.7</b> 回/ゲーム。第19世代では10ゲームすべてが500手の上限まで生き残った</li>
       <li><b>効いた調整</b>: 「穴やオーバーハングは残すほど損」「高さが半分を超えたら生き残り優先」「幅1〜3列の2本目の井戸は深いほど急に損」を先生の評価に入れると(第19世代〜)、生き残りを保ったままテトリスが増えた</li>
+      <li><b>模倣学習の頭打りと 0.8B への切り替え(第20〜24世代)</b>: 第20世代(59.6点/ミノ)を親にした模倣学習は伸びず、第21〜22世代は50点台前半で上下した。4B 第20世代から Kev-0.8B へ蒸留(第23世代 50.4点/ミノ)、0.8B での模倣学習(第24世代 51.1点/ミノ)でも通用することを確認した</li>
+      <li><b>0.8B での価値学習と Kev 自身の探索(第25〜36世代)</b>: 盤面の価値を5段階で学ばせ、それを使った Kev 自身の1手先読みに切り替えると、練習試合が短く崩壊した(探索の候補を上位4手から均等に選んでいたため→上位3手を Kev の確率で選ぶ方式に修正)。価値の目標を「ゲーム終了までの割引報酬」から「10手先までの報酬+10手後の盤面評価」に変えても、実際の結果との相関は 0.43 → 0.62 → 0.77 まで上がった一方、候補手どうしの比較(先生の手を選べる割合)は 54% → 44% と改善せず、値の学習では第一候補を上回る判断ができなかった。全体では 50〜56 点/ミノ前後で足踏みし(先生自身の水準である 55〜57 点/ミノに近いところ)、第37世代から価値学習を止め、Kev 自身のロールアウトによる手のラベル付けに切り替えた</li>
     </ul>
   </section>
 
@@ -200,24 +202,25 @@
     <h2>報酬と評価の変遷</h2>
     <p>報酬は、練習試合の手の良し悪しを決める点数で、実力テストの得点とは別物だ。第16世代からは、この報酬と「盤面の良さ」を、先生(2手先読み)の評価に使っている。</p>
     <div class="tablewrap"><table>
-      <tr><th>項目</th><th><span class="tag v1">v1</span> 第1〜8世代</th><th><span class="tag v2">v2</span> 第9〜11世代</th><th><span class="tag v3">v3</span> 第12〜13世代</th><th><span class="tag v4">v4</span> 第14世代〜(現在)</th></tr>
-      <tr><td>1列 / 2列 / 3列消し</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num hl">10段以下は +0.2 / +0.8 / +3、それより上は +1 / +3 / +5</td></tr>
-      <tr><td>4列消し(テトリス)</td><td class="num">+8</td><td class="num hl">+16</td><td class="num">+16</td><td class="num">+16</td></tr>
-      <tr><td>連続テトリス / T-スピン</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">+8 / 1列につき +4</td></tr>
-      <tr><td>1手生き延びる</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td></tr>
-      <tr><td>塞がった穴ができる</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−1.0</td><td class="num">−1.0</td></tr>
-      <tr><td>オーバーハングができる</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−0.5</td><td class="num hl">−0.8(第15世代〜)</td></tr>
-      <tr><td>穴・オーバーハングを残す</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">1マス・1手 −0.15(第17世代〜)→ −0.35(第19世代〜)</td></tr>
-      <tr><td>穴・オーバーハングの解消</td><td class="num">0</td><td class="num">0</td><td class="num hl">+0.8/マス</td><td class="num">+0.8/マス</td></tr>
-      <tr><td>高さ</td><td class="num">段が増えるたび −0.05</td><td class="num">なし</td><td class="num hl">上から4段以内 −0.5/段</td><td class="num hl">12段超 −0.5/段(第15世代〜)</td></tr>
-      <tr><td>高いときの生き残り優先</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">10段超は超過分の2乗で減点、下げたら +0.6/段(第19世代〜)</td></tr>
-      <tr><td>ゲームオーバー</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td></tr>
-      <tr><td>割引率</td><td class="num">0.9</td><td class="num hl">0.97</td><td class="num">0.97</td><td class="num">0.97</td></tr>
-      <tr><td>盤面の良さ(整形)</td><td>なし</td><td>なし</td><td>穴・オーバーハング・準備済みの行・井戸・天井近く</td><td class="hl">v3 + 行遷移・列遷移・穴の深さ・穴のある行数(Dellacherie / BCTS)、4段消し用以外の井戸(幅1〜3列)は深さの累積で減点</td></tr>
-      <tr><td>学習データ</td><td>1手ごとのアドバンテージ上位35%</td><td>同じ(v2 の手だけ)</td><td class="hl">直前10手のウィンドウで評価</td><td class="hl">第14〜15世代: v3 + 名手の記録。第16世代〜: 先生(2手先読み)の手を模倣</td></tr>
-      <tr><td>練習試合</td><td>200手、温度 1.0</td><td>同じ</td><td class="hl">400手。85%は一番の手、15%は上位3から探索。穴を作らない手を優先。4分の1は練習問題の盤面から</td><td>v3 と同じ。第17世代〜は4ゲーム同時</td></tr>
-      <tr><td>実力テスト</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num hl">10ゲーム(1ゲームずつ)</td></tr>
-      <tr><td>ゲームのルール</td><td class="num">ルール1</td><td class="num">ルール1</td><td class="num hl">ルール3</td><td class="num">ルール3</td></tr>
+      <tr><th>項目</th><th><span class="tag v1">v1</span> 第1〜8世代</th><th><span class="tag v2">v2</span> 第9〜11世代</th><th><span class="tag v3">v3</span> 第12〜13世代</th><th><span class="tag v4">v4</span> 第14〜36世代</th><th><span class="tag v5">v5</span> 第37世代〜(現在)</th></tr>
+      <tr><td>1列 / 2列 / 3列消し</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">+1 / +3 / +5</td><td class="num">10段以下は +0.2 / +0.8 / +3、それより上は +1 / +3 / +5</td><td class="num hl">きれいな盤面(穴・オーバーハング・2本目の井戸なし)で10段以下なら −1.0 / −1.0 / −0.5(テトリス狙い一本に)。穴・2本目の井戸があれば +1 / +3 / +5 で掘り出す</td></tr>
+      <tr><td>4列消し(テトリス)</td><td class="num">+8</td><td class="num hl">+16</td><td class="num">+16</td><td class="num">+16</td><td class="num">+16</td></tr>
+      <tr><td>連続テトリス / T-スピン</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">+8 / 1列につき +4</td><td class="num">+8 / 1列につき +4</td></tr>
+      <tr><td>1手生き延びる</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td><td class="num">+0.05</td></tr>
+      <tr><td>塞がった穴ができる</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−1.0</td><td class="num">−1.0</td><td class="num hl">−1.5</td></tr>
+      <tr><td>オーバーハングができる</td><td class="num">−0.4</td><td class="num">−0.4</td><td class="num hl">−0.5</td><td class="num hl">−0.8(第15世代〜)</td><td class="num hl">−1.2</td></tr>
+      <tr><td>穴・オーバーハングを残す</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">1マス・1手 −0.15(第17世代〜)→ −0.35(第19世代〜)</td><td class="num hl">1マス・1手 −0.6</td></tr>
+      <tr><td>穴・オーバーハングの解消</td><td class="num">0</td><td class="num">0</td><td class="num hl">+0.8/マス</td><td class="num">+0.8/マス</td><td class="num hl">+1.0/マス</td></tr>
+      <tr><td>高さ</td><td class="num">段が増えるたび −0.05</td><td class="num">なし</td><td class="num hl">上から4段以内 −0.5/段</td><td class="num hl">12段超 −0.5/段(第15世代〜)</td><td class="num">同じ</td></tr>
+      <tr><td>高いときの生き残り優先</td><td class="num">なし</td><td class="num">なし</td><td class="num">なし</td><td class="num hl">10段超は超過分の2乗で減点、下げたら +0.6/段(第19世代〜)</td><td class="num">同じ</td></tr>
+      <tr><td>2本目の井戸・幅2〜3列のくぼみ</td><td class="num">なし</td><td class="num">なし</td><td class="num">深さの累積で減点</td><td class="num">深さの累積で減点</td><td class="num hl">残る手ごとに −0.1、埋めた分だけ +0.3(整形の重み 0.15 → 0.3)</td></tr>
+      <tr><td>ゲームオーバー</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td><td class="num">−10</td></tr>
+      <tr><td>割引率</td><td class="num">0.9</td><td class="num hl">0.97</td><td class="num">0.97</td><td class="num">0.97</td><td class="num">0.97</td></tr>
+      <tr><td>盤面の良さ(整形)</td><td>なし</td><td>なし</td><td>穴・オーバーハング・準備済みの行・井戸・天井近く</td><td class="hl">v3 + 行遷移・列遷移・穴の深さ・穴のある行数(Dellacherie / BCTS)、4段消し用以外の井戸(幅1〜3列)は深さの累積で減点</td><td>v4 + 2本目の井戸の重みを2倍に</td></tr>
+      <tr><td>学習データ</td><td>1手ごとのアドバンテージ上位35%</td><td>同じ(v2 の手だけ)</td><td class="hl">直前10手のウィンドウで評価</td><td class="hl">第14〜15世代: v3 + 名手の記録。第16世代〜: 先生(2手先読み)の手を模倣</td><td class="hl">練習局面の6%は Kev 自身のロールアウトの手を優先ラベルに、残りは先生の手</td></tr>
+      <tr><td>練習試合</td><td>200手、温度 1.0</td><td>同じ</td><td class="hl">400手。85%は一番の手、15%は上位3から探索。穴を作らない手を優先。4分の1は練習問題の盤面から</td><td>v3 と同じ。第17世代〜は4ゲーム同時</td><td>v4 と同じ</td></tr>
+      <tr><td>実力テスト</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num">5ゲーム</td><td class="num hl">10ゲーム(1ゲームずつ、最大500手)</td><td class="num hl">10ゲーム(1ゲームずつ、最大1000手)</td></tr>
+      <tr><td>ゲームのルール</td><td class="num">ルール1</td><td class="num">ルール1</td><td class="num hl">ルール3</td><td class="num">ルール3</td><td class="num">ルール3</td></tr>
     </table></div>
     <h3>見直しの理由</h3>
     <ul>
@@ -225,6 +228,7 @@
       <li><b>v2 → v3</b>: 10手以上の連携を学べるよう、評価を10手ウィンドウにした。滑り込み・回転入れを候補にし、穴とオーバーハングを分けて扱った</li>
       <li><b>v3 → v4</b>: 過去の事例(Dellacherie / BCTS、Cold Clear、CBMPI)を取り入れた。第16世代からは、報酬の調整だけでは伸びなかったため、2手先読みの先生の手をまねる模倣学習に切り替えた</li>
       <li><b>v4 の途中調整</b>: 「井戸を何本も残して天井まで積む」「2本井戸で塔が高くなる」「穴を放置する」負け方を見て、余分な井戸・積みすぎ・穴の放置を順に重く評価した</li>
+      <li><b>v4 → v5</b>: 穴や2本目の井戸を作ったらしっかり埋め戻させたいのに、v4 では小さなライン消しでも埋め戻しが進んでしまい、テトリスに育つ前に崩れる盤面が残っていた。きれいな盤面では小さなライン消しに代償を付けてテトリスだけを組み立てさせ、穴や2本目の井戸があるときだけ通常のライン報酬で掘り出しを優先させることにした。穴・オーバーハングの罰則と2本目の井戸の重みも強めた</li>
     </ul>
   </section>
 
@@ -242,7 +246,11 @@
       <li><b>練習試合の並列化(第17世代〜)</b>約2.6倍速く。実力テストは見る価値があるので1ゲームずつ(第18世代〜)</li>
       <li><b>穴の即時修復・生き残り優先・幅の広い井戸(第19世代〜)</b>第20世代で 59.6点/ミノ・テトリス 11.7回/ゲームに到達</li>
       <li><b>模倣学習の頭打ち(第21〜22世代)</b>第20世代(59.6点/ミノ)を親にした2世代が 51.5・47.7点と下回り、第16〜22世代は50点台前半を中心に上下していた</li>
-      <li class="todo"><b>Kev-0.8B へ蒸留(第23世代、進行中)</b>4B の第20世代が24ゲームを打ち、全局面に先生の手を付けたデータで Kev-0.8B を学習する。0.8B では CUDA グラフを有効化(試験で安定、1手 約196ms)</li>
+      <li><b>Kev-0.8B へ蒸留(第23世代)</b>4B の第20世代が多めのゲームを打ち、全局面に先生の手を付けたデータで Kev-0.8B を学習する。0.8B では CUDA グラフを有効化(1手 約196ms)。50.4点/ミノで、0.8B でも通用することを確認</li>
+      <li><b>0.8B での模倣学習(第24世代)</b>51.1点/ミノ、平均500手(上限)、テトリス2.7回/ゲーム。以後 0.8B を使い続ける</li>
+      <li><b>0.8B の強化学習: 価値の質問と Kev 自身の探索(第25〜30世代)</b>盤面の価値を5段階で学習し、Kev 自身の1手先読み探索に使う。探索候補の選び方の誤りで練習試合が2度崩壊(第26・28世代)し、テコ入れ後も価値の精度不足(相関0.43)で第30世代まで振れが続いた</li>
+      <li><b>価値目標の見直しとロールアウトへの移行準備(第31〜36世代)</b>価値目標を「10手先までの報酬+盤面評価」に変更し、Kev の探索は止めて価値だけ鍛えた。相関は 0.43 → 0.62 → 0.77 まで改善したが、候補手どうしの比較(先生の手を選べる割合)は改善せず(54% → 44%)、値の学習を打ち切った。この間 50〜56点/ミノで足踏み(第33世代 55.7点/ミノが 0.8B 最高)</li>
+      <li class="todo"><b>報酬 v5 + Kev 自身のロールアウトによるラベル + テスト1000手(第37世代、進行中)</b>きれいな盤面ではテトリスだけを組み立てさせ、穴・2本目の井戸はしっかり掘り出す報酬に変更。練習局面の6%は Kev 自身の2手ロールアウトでラベルを作る(方策改善)。実力テストを500手から1000手に延長</li>
     </ul>
   </section>
 
@@ -251,15 +259,15 @@
     <h3>学習の3段階</h3>
     <div class="steps">
       <div class="step"><b><span class="n">1</span>強化学習(第1〜15世代)</b>Kev 自身が試した手を、報酬で「期待より良かった」ものに絞って学んだ</div>
-      <div class="step"><b><span class="n">2</span>模倣で加速(第16世代〜、4B、現在)</b>2手先読みの先生の手をまねる。AlphaGo が最初に人間の棋譜をまねたのと同じ位置づけ</div>
-      <div class="step"><b><span class="n">3</span>0.8B で強化学習に戻す</b>4B から Kev-0.8B に蒸留し、Kev 自身に「盤面の良さ」も答えさせて、その判断で先読みする自己改善(AlphaZero 型)に移る</div>
+      <div class="step"><b><span class="n">2</span>模倣で加速(第16〜22世代、4B)</b>2手先読みの先生の手をまねる。AlphaGo が最初に人間の棋譜をまねたのと同じ位置づけ</div>
+      <div class="step"><b><span class="n">3</span>0.8B で強化学習に戻す(第23世代〜、現在)</b>4B から Kev-0.8B に蒸留したあと、Kev 自身の判断(まず盤面の価値、いまはロールアウト)で先生の上限を超える自己改善(AlphaZero・方策改善型)を目指す</div>
     </div>
     <h3>次にやること</h3>
     <div class="grid">
-      <div class="card"><b>0.8B への蒸留(準備済み)</b><p>模倣学習が頭打ちになったら、4B の最良世代に24ゲームを打たせ、全局面に先生の手を付けたデータ(これまでの先生つき世代の分と合わせて最大4,000手)で Kev-0.8B を学習させる。0.8B では CUDA グラフも有効にし、並列化の効果を大きくする。4B の最良世代に届かなければ 4B に戻す</p></div>
-      <div class="card"><b>Kev 自身の判断で先読みする(強化学習)</b><p>Kev に「この盤面はこの先どれくらい良いか」を段階評価で答えさせ、実際のその後の報酬で学習する。その判断を先読み探索の評価に使い、探索で選んだ手を覚えさせる。先生(人間の評価式)の上限を超えることを狙う</p></div>
-      <div class="card"><b>v5: 局面に応じた戦い方と3手の先読み</b><p>低いときは井戸掘り、穴があれば修復、高いときは生き残り、という切り替えを Kev にも伝える。先読みを3手目まで広げ、見えない3手目は7種類のミノそれぞれの最善手の平均で評価する</p></div>
-      <div class="card"><b>候補: Laya</b><p>ModernBERT ベースの軽量な決定モデル(4.2億パラメータ)。Kev と同じ API で、さらに速い。ただし読める長さが512トークンで、問いかけの作り直しが必要。0.8B の後の実験候補</p></div>
+      <div class="card"><b>Kev 自身のロールアウトを数世代見守る(進行中)</b><p>第37世代から、練習局面の6%で Kev の上位3手のロールアウトによるラベルを使っている。数世代(目安2〜3世代)見て、実力テストの得点・手数・テトリス回数が伸びるか確認する</p></div>
+      <div class="card"><b>ロールアウトが効いたら比率と深さを上げる</b><p>効果が見えたら、ロールアウトを行う局面の割合(現在6%)や先読みの深さ(現在10手)を増やし、Kev 自身の打ち方に基づく信号をさらに大きくする</p></div>
+      <div class="card"><b>価値による先読みは条件を満たしてから再挑戦</b><p>第25〜36世代の価値学習は、候補手どうしの比較(どの手が良いかを選ぶ判断)ができないまま終わった。Kev の価値が兄弟候補を正しく順位付けできることを先に確認できたら、先読み探索に戻す</p></div>
+      <div class="card"><b>候補: Laya</b><p>ModernBERT ベースの軽量な決定モデル(4.2億パラメータ)。Kev と同じ API で、さらに速い。ただし読める長さが512トークンで、問いかけの作り直しが必要。引き続き候補として残す</p></div>
     </div>
     <h3 id="speedup">高速化</h3>
     <p>1世代に30〜55分かかっているのを縮める。今回は、<b>Kev-4B とこれまでの学習結果(第10世代まで)をそのまま引き継ぎ</b>、実行環境だけを入れ替える。詳しい構想は <a href="speedup-plan.html">高速化構想</a> にある。</p>
@@ -315,7 +323,7 @@
 const DATA = window.KEV_DATA || { gens: [], updated: "-", training: {} };
 const GENS = DATA.gens.filter(g => g.score != null);
 const fmt = n => n == null ? "-" : Number(n).toLocaleString("ja-JP");
-const colorOf = g => g.reward === "v4" ? "var(--s4)" : g.reward === "v3" ? "var(--s3)" : g.reward === "v2" ? "var(--s2)" : "var(--s1)";
+const colorOf = g => g.reward === "v5" ? "var(--s5)" : g.reward === "v4" ? "var(--s4)" : g.reward === "v3" ? "var(--s3)" : g.reward === "v2" ? "var(--s2)" : "var(--s1)";
 
 document.getElementById("updated").textContent = DATA.updated;
 const tr_ = DATA.training || {};

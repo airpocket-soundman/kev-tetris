@@ -481,15 +481,19 @@ def run_loop(a, ctl: Control):
         if a.demo:
             from .stream import NoisyHeuristic
             return NoisyHeuristic(max(0.0, 0.6 - 0.12 * gen), rng.randrange(1 << 30))
-        # practice: sample only among moves that seal no hole while there are any (5% of moves unrestricted)
-        allow = (lambda game, ps: None if rng.random() < a.hole_free_eps else
-                 [p for p in ps if game.features(p).new_enclosed <= 0]) if temperature > 0 else None
+        # practice: sample only among moves that seal no hole while there are any (5% of moves unrestricted). A move
+        # that clears lines is never masked (gen 37: an I into a deep well cleared 3 rows but left one hole, the mask
+        # hid it and the stack topped out), and a stack above SAFE_HEIGHT is not masked at all
+        high = lambda game: board_features(game.board)["max_height"] > SAFE_HEIGHT
+        allow = (lambda game, ps: None if rng.random() < a.hole_free_eps or high(game) else
+                 [p for p in ps if (f := game.features(p)).new_enclosed <= 0 or f.lines > 0]) if temperature > 0 else None
         if temperature > 0 and rl_means:   # RL practice: Kev's own lookahead, judged by Kev's own value answers
             return KevSearchPolicy(srv.url, lambda b, f, c, dd: shaped_reward(b, f, c, dd), level_value(rl_means),
                                    top_k=a.search_k, explore=a.explore, gamma=a.gamma, seed=rng.randrange(1 << 30), allow=allow,
                                    value_scale=(rl_means[-1] - rl_means[0]) / 4)
+        # no exploration above SAFE_HEIGHT: a high stack is played for survival with Kev's best move
         return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow,
-                         explore=a.explore, top_k=a.top_k)
+                         explore=a.explore, top_k=a.top_k, explore_if=lambda game: not high(game))
 
     feed = live.Feed()   # every move played here also goes to the stream screen
     collapsed: set[int] = set()

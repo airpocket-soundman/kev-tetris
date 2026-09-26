@@ -27,12 +27,12 @@ class KevPolicy:
     """Asks a running Kev server. temperature 0 = the argmax; > 0 samples from p^(1/T) (exploration for RL)."""
 
     def __init__(self, base_url: str = "http://127.0.0.1:8009", temperature: float = 0.0, seed: int | None = None, timeout: float = 300,
-                 allow=None, explore: float = 1.0, top_k: int = 0):
+                 allow=None, explore: float = 1.0, top_k: int = 0, explore_if=None):
         """allow(game, placements) -> the placements sampling may pick from (None = all); only used when temperature > 0.
         The first request after a server start compiles kernels for a while, hence the long timeout."""
         # explore: share of moves that sample (the rest play the best allowed move); top_k: sample among the k likeliest
         self.base_url, self.temperature, self.timeout, self.allow = base_url.rstrip("/"), temperature, timeout, allow
-        self.explore, self.top_k = explore, top_k
+        self.explore, self.top_k, self.explore_if = explore, top_k, explore_if   # explore_if(game): may this move explore
         self.rng = random.Random(seed)
 
     def decide(self, game: Game) -> Decision:
@@ -46,7 +46,8 @@ class KevPolicy:
         if self.temperature > 0:
             pool = (self.allow(game, placements) if self.allow else None) or placements
             pool = sorted(pool, key=lambda p: probs.get(p.key, 0.0), reverse=True)
-            if self.rng.random() >= self.explore: pool = pool[:1]          # exploit: the likeliest allowed move
+            if self.rng.random() >= self.explore or (self.explore_if and not self.explore_if(game)):
+                pool = pool[:1]                                              # exploit: the likeliest allowed move
             elif self.top_k: pool = pool[:self.top_k]
             keys = [p.key for p in pool]
             w = [max(probs.get(k, 0.0), 1e-9) ** (1 / self.temperature) for k in keys]
