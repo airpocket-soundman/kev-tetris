@@ -162,6 +162,8 @@ v2 の効果を見てから、次をまとめて入れる。v2 の検証が濁�
 
 参考: [The Game of Tetris in Machine Learning(Algorta & Şimşek)](https://arxiv.org/abs/1905.01652)、[CBMPI(NeurIPS 2013)](https://papers.nips.cc/paper/5190-approximate-dynamic-programming-finally-performs-well-in-the-game-of-tetris.pdf)、[nuno-faria/tetris-ai](https://github.com/nuno-faria/tetris-ai)、[Cold Clear](https://github.com/MinusKelvin/cold-clear)
 
+**基本方針(2026-09-26)**: テトリス狙いは強く持つが、穴やオーバーハングができたらすぐに直す。第17世代から、穴とオーバーハングが残っている間は1マスにつき毎手 −0.15 のコストを課し(早く直すほど得)、Kev への指示にも「できたらすぐ直し、そのあと4段消しの準備に戻る」を加えた。
+
 ### 5.8 v5 の案(先生つき学習が頭打ちになったら)
 
 頭打ちの目安: 1ミノあたり得点と平均手数が、2〜3世代続けて伸びない。

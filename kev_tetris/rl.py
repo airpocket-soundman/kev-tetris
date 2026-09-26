@@ -141,6 +141,8 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
         r = (LINE_REWARD_SAFE if before["max_height"] <= SAFE_HEIGHT else LINE_REWARD)[cleared] + 0.05
         if cleared and b2b >= 2: r += 8.0                  # back-to-back Tetris / T-spin clear
         if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
+        # holes and overhangs cost every move they stay (from gen 17): repair them at once, then build for a Tetris
+        r -= 0.15 * (after["enclosed"] + after["overhang"])
     else:
         r = LINE_REWARD[cleared] + 0.05
     r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more

@@ -16,7 +16,8 @@ INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to place 
                 "at once) scores far more than single lines: stack flat, keep one column open as a deep well, and fill it "
                 "with an I piece. Keep exactly one well: other deep gaps are dangerous. Keep the stack at about half the "
                 "board height or lower. Enclosed holes are very bad; overhangs can still be filled by sliding a piece under "
-                "them. A stack reaching the top loses the game.")
+                "them. When a hole or an overhang appears, repair it at once, then go back to building for a Tetris. "
+                "A stack reaching the top loses the game.")
 
 
 def board_text(board, margin: int = 2) -> str:
