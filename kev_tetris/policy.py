@@ -85,8 +85,8 @@ class RandomPolicy:
 class KevServer:
     """`python -m kev.serve --run <checkpoint>` as a child process, from the deployed Kev (kevenv). Use as a context manager."""
 
-    def __init__(self, run: str, port: int = 8009, log: Path | None = None):
-        self.run, self.port = run, port
+    def __init__(self, run: str, port: int = 8009, log: Path | None = None, env: dict | None = None):
+        self.run, self.port, self.env = run, port, env or {}
         self.log = log or ROOT / "runs" / "serve.log"
         self.proc: subprocess.Popen | None = None
 
@@ -109,7 +109,7 @@ class KevServer:
         f = self.log.open("a", encoding="utf-8")
         f.write(f"\n=== {time.strftime('%Y-%m-%d %H:%M:%S')} serve {self.run} ===\n"); f.flush()
         self.proc = subprocess.Popen([kevenv.kev_python(), "-m", "kev.serve", "--run", kevenv.resolve_run(self.run), "--port", str(self.port)],
-                                     stdout=f, stderr=subprocess.STDOUT, cwd=kevenv.kev_home(), env=kevenv.kev_env())
+                                     stdout=f, stderr=subprocess.STDOUT, cwd=kevenv.kev_home(), env={**kevenv.kev_env(), **self.env})
         t0 = time.time()
         while not self.ready():
             if self.proc.poll() is not None: raise RuntimeError(f"kev.serve exited ({self.proc.returncode}); see {self.log}")

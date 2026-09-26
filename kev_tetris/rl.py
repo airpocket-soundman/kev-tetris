@@ -396,8 +396,8 @@ def wait_for_gpu(ctl: Control, need_gb: float, what: str):
 class _Serving:
     """KevServer as a context manager that honours pause / stop while the weights load."""
 
-    def __init__(self, run, port, ctl, need_gb=0.0):
-        self.srv, self.ctl, self.need_gb = KevServer(run, port), ctl, need_gb
+    def __init__(self, run, port, ctl, need_gb=0.0, env=None):
+        self.srv, self.ctl, self.need_gb = KevServer(run, port, env=env), ctl, need_gb
 
     def __enter__(self):
         wait_for_gpu(self.ctl, self.need_gb, "Kevの読み込み")
@@ -421,8 +421,14 @@ def run_loop(a, ctl: Control):
     demo_gens: list[dict] = []   # --demo keeps its generations in memory: runs/generations.json is left alone
     load = (lambda: demo_gens) if a.demo else generations.load
 
-    def serving(run):
-        return nullcontext(None) if a.demo else _Serving(run, a.port, ctl, a.need_serve_gb)
+    def serving(run, other_model=False):
+        """A Kev server for `run`. CUDA graphs only for the current model when --cuda_graphs (e.g. 0.8B), never for the
+        other model a distillation reads from (4B on 16 GB is unstable with them)."""
+        if a.demo: return nullcontext(None)
+        env = {"KEV_CUDA_GRAPHS": "1"} if a.cuda_graphs and not other_model else {"KEV_CUDA_GRAPHS": "0"}
+        return _Serving(run, a.port, ctl, a.need_teacher_serve_gb if other_model else a.need_serve_gb, env)
+
+    model_of = lambda x: x.get("model", "Kev-4B")
 
     def policy(srv, gen, temperature=0.0):
         if a.demo:
@@ -435,6 +441,61 @@ def run_loop(a, ctl: Control):
                          explore=a.explore, top_k=a.top_k)
 
     feed = live.Feed()   # every move played here also goes to the stream screen
+
+    def distill(g, gens):
+        """Distillation into a new model (e.g. Kev-0.8B). The best generation so far (same rules) plays practice games,
+        every position it meets gets the lookahead search's move as its label, the earlier teacher generations' records
+        are added, and the new model's released checkpoint is fine-tuned on all of it. Then it is tested like any
+        generation and registered under the new model's name."""
+        src = max([x for x in gens if x.get("eval") and x.get("rules", 1) == RULES], key=lambda x: x["eval"]["mean_score"])
+        t0 = time.time()
+        ctl.report(force=True, phase="collect", gen=g, detail=f"蒸留: 第{src['gen']}世代({model_of(src)})を読み込み中", progress=0.0)
+        print(f"[gen {g}] distilling {model_of(src)} gen {src['gen']} into {a.model_name}", flush=True)
+        search = lambda game, ps: teacher.search_label(game, ps, lambda b, f, c, dd: shaped_reward(b, f, c, dd),
+                                                       potential, a.teacher_first_k)
+        show, done = Showcase(), []
+        with serving(src["run"], other_model=True) as srv:
+            def job(i, seed, pol):
+                def on_step(game, d):
+                    ctl.checkpoint()
+                    ctl.report(detail=f"蒸留用の対局 {len(done)}/{a.distill_games} ゲーム完了", progress=len(done) / a.distill_games)
+                def on_move(ev):
+                    if show.shown(i):
+                        feed.publish({"gen": src["gen"], "phase": "practice", "game": i + 1, "games": a.distill_games,
+                                      "max_pieces": a.max_pieces, "training_gen": g, "parallel": a.parallel}, ev)
+                def run():
+                    show.start(i)
+                    try: return play_episode(pol, seed, a.max_pieces, on_step, on_move, search=search)
+                    finally: show.end(i); done.append(i)
+                return run
+            eps = run_games(a.parallel, [job(i, rng.randrange(1 << 30), policy(srv, src["gen"], a.temperature))
+                                         for i in range(a.distill_games)])
+        fits = lambda r: r and len(json.dumps(r)) <= MAX_RECORD_CHARS
+        recs = [s.teacher_record for e in eps for s in e.steps if fits(s.teacher_record)]
+        rng.shuffle(recs)
+        older = [p for x in gens if x.get("teacher") for p in [data_dir / f"gen-{x['gen']:03d}.jsonl"] if p.exists()]
+        lines = [json.dumps(r, ensure_ascii=False) for r in recs] + [l for p in older for l in p.read_text(encoding="utf-8").splitlines() if l]
+        lines = lines[:a.distill_cap]
+        data = data_dir / f"gen-{g:03d}.jsonl"
+        data.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        print(f"[gen {g}] distillation set: {len(recs)} new + older teacher records -> {len(lines)}", flush=True)
+        out = runs / f"gen-{g:03d}"
+        if out.exists(): shutil.rmtree(out)
+        ctl.report(force=True, phase="train", detail=f"{len(lines)} 手ぶんのデータで蒸留", progress=None)
+        wait_for_gpu(ctl, a.need_train_gb, "学習")
+        train_generation(data, a.start, out, a, ctl)
+        run = str(out.relative_to(ROOT)).replace("\\", "/")
+        ctl.report(force=True, phase="test", detail=f"第{g}世代 を読み込み中", progress=0.0)
+        with serving(run) as srv:
+            ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), g, test_feed(g), parallel=a.test_parallel)
+        generations.upsert({"gen": g, "run": run, "parent": src["gen"], "model": a.model_name, "reward": REWARD_VERSION,
+                            "rules": RULES, "teacher": False, "distilled_from": src["gen"],
+                            "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(lines),
+                                      "trained_on": len(lines), "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
+                                      "minutes": round((time.time() - t0) / 60, 1)},
+                            "eval": ev})
+        ctl.report(force=True, last_eval={"gen": g, **ev})
+        print(f"[gen {g}] distilled {a.model_name}: eval {ev}", flush=True)
 
     def tester(gen):
         pieces_now = {}
@@ -467,6 +528,10 @@ def run_loop(a, ctl: Control):
         # --branch_from starts a new line from an older generation; after that the latest one is the parent
         # parent: the best tested generation among the latest few of this reward version; the first one of a version
         # starts from the best generation so far (or --branch_from)
+        if not a.demo and not any(model_of(x) == a.model_name for x in gens if x.get("eval")):
+            distill(g, gens)    # the first generation of a new model: learned from the best one so far
+            continue
+        gens = [x for x in gens if model_of(x) == a.model_name]   # a model's lineage continues within itself
         mine = [x for x in gens if x.get("reward") == REWARD_VERSION and x.get("eval")]
         same_rules = [x for x in gens if x.get("eval") and x.get("rules", 1) == RULES]   # scores under other rules don't compare
         if mine: pool = mine[-a.parent_window:]
@@ -585,6 +650,10 @@ def main(argv=None):
     ap.add_argument("--drill_frac", type=float, default=0.25, help="practice: share of games starting from a Tetris drill board")
     ap.add_argument("--window", type=int, default=10, help="moves per credit window (v3)")
     ap.add_argument("--parent_window", type=int, default=3, help="the parent is the best tested of this many latest generations")
+    ap.add_argument("--cuda_graphs", type=int, choices=[0, 1], default=0, help="CUDA graphs for this model's Kev servers (0.8B: yes; 4B on 16 GB: no)")
+    ap.add_argument("--need_teacher_serve_gb", type=float, default=10.0, help="free GPU memory before loading the model a distillation reads from")
+    ap.add_argument("--distill_games", type=int, default=24, help="games the best generation plays to build a distillation set")
+    ap.add_argument("--distill_cap", type=int, default=4000, help="records in a distillation set")
     ap.add_argument("--test_parallel", type=int, default=1, help="test games at the same time: 1 = one after another, so the stream shows each whole game")
     ap.add_argument("--parallel", type=int, default=4, help="games played at the same time (practice and tests); more is faster overall "
                     "but each game waits longer for Kev (8 games: ~2.3 s per move on 4B without CUDA graphs)")
@@ -610,6 +679,12 @@ def main(argv=None):
     ap.add_argument("--demo", action="store_true", help="no GPU: heuristic players and a dummy training process, runs/generations.json untouched (to try the controls)")
     ap.add_argument("--demo_train_seconds", type=int, default=30)
     a = ap.parse_args(argv)
+    # runs/model.json switches the model without touching the container's command, e.g.
+    # {"start": "jaredpalmer/kev-0.8b", "model_name": "Kev-0.8B", "base": "Qwen/Qwen3.5-0.8B-Base",
+    #  "need_serve_gb": 3, "need_train_gb": 6, "cuda_graphs": 1}
+    model_file = ROOT / "runs" / "model.json"
+    if model_file.exists() and not a.demo:
+        for k, v in json.loads(model_file.read_text(encoding="utf-8")).items(): setattr(a, k, v)
 
     set_command("run")
     ctl = Control()
