@@ -632,7 +632,10 @@ def run_loop(a, ctl: Control):
             rng.shuffle(diff); rng.shuffle(same)
             vrecs, means = value_records(eps, a.gamma)
             vrecs = [r for r in vrecs if fits(r)]; rng.shuffle(vrecs)
-            recs = (diff + same[:max(0, a.teacher_cap // 4)])[:a.teacher_cap] + vrecs[:a.value_cap]
+            # moves filled up to teacher_cap with agreements: with Kev's own search few moves differ (gen 29: 129), and
+            # a set of mostly value records (279 moves vs 1200 values) let the move answers drift - 207 pieces in the test
+            moves = (diff + same)[:a.teacher_cap]
+            recs = moves + vrecs[:min(a.value_cap, len(moves))]
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
                   f"level means {[round(m, 1) for m in means]}", flush=True)
@@ -728,7 +731,7 @@ def main(argv=None):
     ap.add_argument("--search_k", type=int, default=4, help="RL: Kev's likeliest moves the lookahead judges")
     ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
-    ap.add_argument("--value_cap", type=int, default=1200, help="RL: value records per generation")
+    ap.add_argument("--value_cap", type=int, default=600, help="RL: value records per generation")
     ap.add_argument("--teacher_cap", type=int, default=600, help="teacher records per generation (disagreements first)")
     ap.add_argument("--teacher_first_k", type=int, default=8, help="first-ply placements the search expands")
     ap.add_argument("--elite_games", type=int, default=2, help="practice games per generation whose good moves join the elite set")
