@@ -216,6 +216,17 @@ def ready_rows(board, heights=None):
     return n
 
 
+def extra_wells_cumulative(heights):
+    """Dellacherie's cumulative wells (a well d deep counts 1+2+...+d) over every well but the deepest: a second deep
+    well grows costly fast, so it gets filled instead of built around."""
+    depths = []
+    for x in range(WIDTH):
+        d = min(heights[x - 1] if x > 0 else HEIGHT, heights[x + 1] if x < WIDTH - 1 else HEIGHT) - heights[x]
+        if d > 0: depths.append(d)
+    depths.sort()
+    return sum(d * (d + 1) // 2 for d in depths[:-1])
+
+
 def max_well_depth(heights):
     return max(max(0, min(heights[x - 1] if x > 0 else HEIGHT, heights[x + 1] if x < WIDTH - 1 else HEIGHT) - heights[x])
                for x in range(WIDTH))
@@ -253,7 +264,8 @@ def board_features(board):
     return {"heights": hs, "holes": count_holes(board, hs), "max_height": max(hs), "agg_height": sum(hs),
             "bumpiness": sum(abs(hs[i] - hs[i + 1]) for i in range(WIDTH - 1)), "wells": wells_depth(hs),
             "enclosed": enclosed, "overhang": overhang, "ready_rows": ready_rows(board, hs), "max_well": max_well_depth(hs),
-            "row_transitions": row_t, "col_transitions": col_t, "hole_depth": hole_depth, "hole_rows": hole_rows}
+            "row_transitions": row_t, "col_transitions": col_t, "hole_depth": hole_depth, "hole_rows": hole_rows,
+            "extra_wells": extra_wells_cumulative(hs)}
 
 
 def is_tspin(board, p) -> bool:

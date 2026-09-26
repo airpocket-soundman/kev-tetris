@@ -166,7 +166,8 @@ def potential(f: dict) -> float:
         - 0.5 * max(0, f["max_height"] - danger_height())
     if REWARD_VERSION == "v4":   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
         phi -= 0.1 * f["row_transitions"] + 0.1 * f["col_transitions"] + 0.2 * f["hole_depth"] + 0.5 * f["hole_rows"]
-        phi -= 0.3 * (f["wells"] - f["max_well"])          # one well for the I piece; every other well is a liability
+        # one well for the I piece; every other well is a liability that grows fast with its depth (gen 18: two-well towers)
+        phi -= 0.15 * f["extra_wells"]
     return phi
 
 
