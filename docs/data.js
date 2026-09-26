@@ -256,7 +256,7 @@ window.KEV_DATA = {
   }
  ],
  "training": {
-  "gen": 13,
-  "state": "stopped"
+  "gen": 12,
+  "state": "running"
  }
 };
