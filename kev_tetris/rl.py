@@ -568,6 +568,8 @@ def run_loop(a, ctl: Control):
         gens = [x for x in gens if model_of(x) == a.model_name]   # a model's lineage continues within itself
         mine = [x for x in gens if x.get("reward") == REWARD_VERSION and x.get("eval")]
         same_rules = [x for x in gens if x.get("eval") and x.get("rules", 1) == RULES]   # scores under other rules don't compare
+        if a.learner == "rl" and not a.demo and any(x.get("learner") == "rl" for x in mine):
+            mine = [x for x in mine if x.get("learner") == "rl"]   # RL continues from generations whose value answers were trained
         if mine: pool = mine[-a.parent_window:]
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
         else: pool = same_rules or [x for x in gens if x.get("eval")]
