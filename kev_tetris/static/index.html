@@ -291,10 +291,16 @@ function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels, digits = 0) {
   const now = state.gen ? state.gen.gen : null;
   for (const [key, color] of [[bestKey, "var(--s-best)"], [meanKey, "var(--s-mean)"]]) {
     const pts = gens.filter(g => g[key] != null);
-    if (pts.length > 1) svg += `<polyline fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${pts.map(g => `${x(g.gen)},${y(g[key])}`).join(" ")}"/>`;
-    for (const g of pts) svg += `<circle cx="${x(g.gen)}" cy="${y(g[key])}" r="${g.gen === now ? 7 : 5}" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+    const fixed = pts.filter(g => !g.provisional), prov = pts.find(g => g.provisional);
+    if (fixed.length > 1) svg += `<polyline fill="none" stroke="${color}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${fixed.map(g => `${x(g.gen)},${y(g[key])}`).join(" ")}"/>`;
+    if (prov && fixed.length) {   // a test in progress: dashed segment to a hollow point
+      const f = fixed[fixed.length - 1];
+      svg += `<line x1="${x(f.gen)}" y1="${y(f[key])}" x2="${x(prov.gen)}" y2="${y(prov[key])}" stroke="${color}" stroke-width="2.5" stroke-dasharray="5 5"/>`;
+    }
+    for (const g of fixed) svg += `<circle cx="${x(g.gen)}" cy="${y(g[key])}" r="${g.gen === now ? 7 : 5}" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+    if (prov) svg += `<circle cx="${x(prov.gen)}" cy="${y(prov[key])}" r="7" fill="var(--panel)" stroke="${color}" stroke-width="3"/>`;
     const last = pts[pts.length - 1];   // direct label on the latest point only
-    if (last) svg += `<text class="val" x="${x(last.gen) + 12}" y="${y(last[key]) + 6}">${num(last[key])}</text>`;
+    if (last) svg += `<text class="val" x="${x(last.gen) + 12}" y="${y(last[key]) + 6}">${num(last[key])}${last.provisional ? " 暫定" : ""}</text>`;
   }
   el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img">${svg}</svg>`;
 }

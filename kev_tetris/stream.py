@@ -322,12 +322,33 @@ def play(hub, seat, gens, a, stop, next_entry, should_yield=lambda: False):
             "mode": seat.mode, "ended": ended}
 
 
+def provisional(gen: int, games: dict) -> dict:
+    """A test in progress as a chart point: per-piece rates over the games so far (the running one included)."""
+    done = [v for v in games.values() if v[2] > 0]
+    if not done: return {"gen": gen, "provisional": True}
+    sc, ln, pc = (sum(v[i] for v in done) for i in range(3))
+    return {"gen": gen, "provisional": True, "spp": round(sc / pc, 2), "lpp": round(ln / pc, 4),
+            "best_spp": round(max(v[0] / v[2] for v in done), 2), "best_lpp": round(max(v[1] / v[2] for v in done), 4),
+            "mean_pieces": round(pc / len(done), 1), "best_pieces": max(v[2] for v in done)}
+
+
 def follow_training(hub, a, stop, load_gens):
-    """Relay the training loop's games (runs/rl_live.json) move by move until it stops playing."""
+    """Relay the training loop's games (runs/rl_live.json) move by move until it stops playing. During a test, the
+    generation's provisional results go to the charts every couple of seconds."""
     last_seq, last_key, last_sent = None, None, 0.0
+    test_key, test_games, last_prov = None, {}, 0.0
     while not stop.is_set():
         data = live.read()
         if not data: return
+        if (data["pid"], data["seq"]) != last_seq and data["info"]["phase"] == "test":
+            info, mv = data["info"], data["move"]
+            if test_key != (data["pid"], info["gen"]): test_key, test_games = (data["pid"], info["gen"]), {}
+            test_games[info["game"]] = (mv["score"], mv["lines"], mv["pieces"])
+            if time.time() - last_prov >= 2:
+                last_prov = time.time()
+                gens = progress.gens_event(load_gens())["gens"]
+                gens = [g for g in gens if g["gen"] != info["gen"]] + [provisional(info["gen"], test_games)]
+                hub.publish("gens", {"gens": sorted(gens, key=lambda g: g["gen"])})
         # at most ~2 moves a second reach the page: OBS renders the page and encodes on the GPU Kev is busy with
         if (data["pid"], data["seq"]) != last_seq and time.time() - last_sent >= a.relay_interval:
             last_sent = time.time()
