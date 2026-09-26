@@ -127,6 +127,11 @@ class Episode:
 
 
 DANGER_HEIGHT = 16   # the top 4 rows: stacking into them is penalised, the rest of the height is free (Tetris setups)
+DANGER_HEIGHT_V4 = 12  # v4 (from gen 15): gen 14 stacked to 18-20 around several deep wells and topped out
+
+
+def danger_height() -> int:
+    return DANGER_HEIGHT_V4 if REWARD_VERSION == "v4" else DANGER_HEIGHT
 
 
 def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bool = False, b2b: int = 0) -> float:
@@ -137,11 +142,11 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
     else:
         r = LINE_REWARD[cleared] + 0.05
     r -= 1.0 * max(0, after["enclosed"] - before["enclosed"])     # a hole no piece can reach any more
-    r -= 0.5 * max(0, after["overhang"] - before["overhang"])     # a covered cell a slide can still fill
+    r -= (0.8 if REWARD_VERSION == "v4" else 0.5) * max(0, after["overhang"] - before["overhang"])   # a slide can still fill it
     # resolved: filled by a slide, or uncovered because the rows above cleared. Less than the penalty, so creating a
     # hole and filling it again never pays
     r += 0.8 * max(0, (before["enclosed"] + before["overhang"]) - (after["enclosed"] + after["overhang"]))
-    r -= 0.5 * max(0, after["max_height"] - DANGER_HEIGHT)
+    r -= 0.5 * max(0, after["max_height"] - danger_height())
     if died: r -= 10.0
     return r
 
@@ -149,9 +154,10 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
 def potential(f: dict) -> float:
     """How good a board is, for the window credit: few holes, rows ready for a Tetris, a well (capped at 4 deep)."""
     phi = -1.0 * f["enclosed"] - 0.5 * f["overhang"] + 0.3 * f["ready_rows"] + 0.2 * min(f["max_well"], 4) \
-        - 0.5 * max(0, f["max_height"] - DANGER_HEIGHT)
+        - 0.5 * max(0, f["max_height"] - danger_height())
     if REWARD_VERSION == "v4":   # Dellacherie / BCTS terms: rugged and holey boards are worse than they look
         phi -= 0.1 * f["row_transitions"] + 0.1 * f["col_transitions"] + 0.2 * f["hole_depth"] + 0.5 * f["hole_rows"]
+        phi -= 0.3 * (f["wells"] - f["max_well"])          # one well for the I piece; every other well is a liability
     return phi
 
 

@@ -331,7 +331,7 @@
       <li><b>高速化: Docker + 高速化ライブラリ(4B のまま)</b><span class="status done">推論は約26%短縮。学習は測定中</span></li>
       <li><b>v2 の学習を再開(第11世代、コンテナで実行)</b><span class="status done">完了。1ミノあたり得点 38.4 → 40.4、平均手数 240 → 351 に回復</span></li>
       <li><b>v3 で学習(第12〜13世代、ルール3)</b><span class="status done">1ミノあたり得点 36.3 → 30.2、平均手数 151 → 86 と伸び悩み、v4 を前倒し</span></li>
-      <li class="todo"><b>v4 で学習(第14世代〜、第12世代から)</b><span class="status now">進行中。報酬・盤面の評価・名手の記録・テスト10ゲーム</span></li>
+      <li class="todo"><b>v4 で学習(第14世代〜、第12世代から)</b><span class="status now">進行中。第14世代でテトリスが初めて出た(0.5回/ゲーム)が、深い井戸を何本も残して天井まで積む負け方が続いたため、第15世代から「井戸は1本」「12段から積みすぎの減点」「オーバーハング −0.8」に調整</span></li>
       <li class="todo"><b>v4 後半: Kev 自身に盤面の良さを答えさせる、現在と次のミノで2手の先読み探索</b><span class="status next">v4 の数世代後</span></li>
       <li class="todo"><b>v3 の世代を 0.8B に蒸留する</b><span class="status next">v3 が条件を満たしたら</span></li>
       <li class="todo"><b>さらなる高速化(複数ゲームの同時進行、0.8B + CUDA グラフの試行)</b><span class="status next">未着手</span></li>
