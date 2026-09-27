@@ -501,6 +501,12 @@ def run_loop(a, ctl: Control):
                          explore=a.explore, top_k=a.top_k, explore_if=lambda game: not high(game))
 
     feed = live.Feed()   # every move played here also goes to the stream screen
+
+    def strength(x):
+        """A tested generation's strength: score per piece (the test's piece cap changed: gens 37-38 ran to 1000 pieces,
+        so their mean scores are about twice the others'). Older entries without it: mean score / pieces."""
+        ev = x["eval"]
+        return ev.get("score_per_piece") or ev["mean_score"] / max(1, ev.get("mean_pieces", 1))
     collapsed: set[int] = set()
     rng_ro = random.Random(a.seed + 7 if hasattr(a, "seed") and a.seed is not None else None)
 
@@ -509,7 +515,7 @@ def run_loop(a, ctl: Control):
         every position it meets gets the lookahead search's move as its label, the earlier teacher generations' records
         are added, and the new model's released checkpoint is fine-tuned on all of it. Then it is tested like any
         generation and registered under the new model's name."""
-        src = max([x for x in gens if x.get("eval") and x.get("rules", 1) == RULES], key=lambda x: x["eval"]["mean_score"])
+        src = max([x for x in gens if x.get("eval") and x.get("rules", 1) == RULES], key=strength)
         t0 = time.time()
         ctl.report(force=True, phase="collect", gen=g, detail=f"蒸留: 第{src['gen']}世代({model_of(src)})を読み込み中", progress=0.0)
         print(f"[gen {g}] distilling {model_of(src)} gen {src['gen']} into {a.model_name}", flush=True)
@@ -601,7 +607,7 @@ def run_loop(a, ctl: Control):
         if mine: pool = mine[-a.parent_window:]
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
         else: pool = same_rules or [x for x in gens if x.get("eval")]
-        prev = max(pool, key=lambda x: x["eval"]["mean_score"])
+        prev = max(pool, key=strength)
         if a.generations and g > a.generations: break   # 0 = until stopped
         rl = a.learner == "rl" and not a.demo
         # the parent's value levels, once an RL generation has trained them; before that (the first RL generation) the
