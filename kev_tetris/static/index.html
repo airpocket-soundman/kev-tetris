@@ -151,10 +151,6 @@
       <div id="legend"><span><i style="background:var(--s-mean)"></i>平均</span><span><i style="background:var(--s-best)"></i>最高</span></div>
       <div class="csub">1ミノあたりの得点</div>
       <div class="chart" id="chartScore"></div>
-      <div class="csub">1ミノあたりのライン数(最大0.4)</div>
-      <div class="chart" id="chartLines"></div>
-      <div class="csub">生き残った手数(上限500・第37〜38世代は1000)</div>
-      <div class="chart" id="chartPieces"></div>
     </div>
   </div>
 
@@ -266,8 +262,6 @@ function showGen(g) {
 }
 function drawChart() {
   plot($("chartScore"), "spp", "best_spp", [5, 10, 20, 25, 50], 40, false, 1);
-  plot($("chartLines"), "lpp", "best_lpp", [0.05, 0.1, 0.2], 0.4, false, 2);
-  plot($("chartPieces"), "mean_pieces", "best_pieces", [50, 100, 250], 100, true);
 }
 function plot(el, meanKey, bestKey, niceSteps, minTop, xLabels, digits = 0) {
   const num = v => digits ? Number(v).toFixed(digits) : fmt(Math.round(v));
