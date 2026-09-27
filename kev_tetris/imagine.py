@@ -183,6 +183,16 @@ def _own_moves(args):
     rng, out = random.Random(seed), []
     while len(out) < n:
         g = Game(seed=rng.randrange(1 << 30))
+        if rng.random() < 0.2:
+            # a Tetris drill (full rows around one well), often with an I piece in hand: finding the Tetris from the
+            # board alone - without "clears 4" in the option text - is what the weaning games still lack
+            drill = rl.make_drill(rng)
+            g.board = [[0] * len(drill[0]) for _ in range(len(g.board) - len(drill))] + [row[:] for row in drill]
+            if rng.random() < 0.5: g.current = "I"
+            ps = g.placements()
+            key = next((p.key for p in ps if g.features(p).lines == 4), None) or teacher.search_label(g, ps, reward, rl.potential, 8)
+            out.append(interface.to_record(g, ps, key, level=3))
+            continue
         stops = set(range(rng.randrange(2), 300, 2))   # every other position of a teacher game (cheap: one search per move)
         last = max(stops)
         while not g.over and g.pieces <= last and len(out) < n:
