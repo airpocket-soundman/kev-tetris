@@ -164,9 +164,10 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
         if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
         # holes and overhangs cost every move they stay (gen 17: 0.15, gen 19: 0.35): repair them at once, then build
         r -= (0.6 if v5 else 0.35) * (after["enclosed"] + after["overhang"])
-        if v5:   # a Tetris set up (an I would clear 4 rows now) pays; spoiling one without the Tetris costs as much
-            if after["tetris_ready"] and not before["tetris_ready"]: r += TETRIS_READY
-            elif before["tetris_ready"] and not after["tetris_ready"] and cleared != 4: r -= TETRIS_READY
+        # a Tetris set up (an I would clear 4 rows now) pays. Spoiling one is not penalised as such (with nowhere else to
+        # go it can be right); an I that skips a ready Tetris is (MISSED_TETRIS), and a piece dropped into the well pays
+        # through the holes, overhangs and small clears it makes
+        if v5 and after["tetris_ready"] and not before["tetris_ready"]: r += TETRIS_READY
         if v5:   # a second well (or a 2-3 wide dip) costs every move it stays; filling it pays
             r -= 0.1 * after["extra_wells"]
             r += 0.3 * max(0, before["extra_wells"] - after["extra_wells"])
