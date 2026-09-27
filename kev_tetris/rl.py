@@ -785,6 +785,10 @@ def run_loop(a, ctl: Control):
 
 def main(argv=None):
     import argparse
+    # run as `python -m kev_tetris.rl` this module is __main__: register it as kev_tetris.rl too, so the rollout workers
+    # (forked) use the code that is running instead of importing the file on disk again (gen 41: a newer file on disk
+    # met the running tetris module and the workers failed)
+    sys.modules.setdefault("kev_tetris.rl", sys.modules[__name__])
     ap = argparse.ArgumentParser(description="Train Kev at Tetris, one generation at a time")
     ap.add_argument("--start", default="jaredpalmer/kev-4b", help="generation 0: a released Kev checkpoint (hub id) or a run directory")
     ap.add_argument("--model_name", default="Kev-4B", help="shown on the stream screen")
