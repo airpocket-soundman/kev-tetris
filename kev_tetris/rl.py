@@ -892,7 +892,7 @@ def run_loop(a, ctl: Control):
                 print(f"[gen {g}] own-judgement test {ev_own}", flush=True)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
                  "rules": RULES, "teacher": bool(a.teacher) and not rl, "option_level": OWN_LEVEL if share >= 1 else getattr(a, "option_level", 0),
-                 **({"own_share": share, "eval_own": ev_own} if share else {}),
+                 **({"own_share": share, "eval_own": ev if share >= 1 else ev_own} if share else {}),
                  **({"learner": "rl", "value_means": means, "search": "kev" if rl_means else "hand"} if rl else {}),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
