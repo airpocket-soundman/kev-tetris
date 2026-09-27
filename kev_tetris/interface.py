@@ -48,11 +48,29 @@ def state_text(game: Game, next_known: bool = True) -> str:
             f"Lines cleared so far: {game.lines}.")
 
 
+# How much of a move's outcome the option text computes for Kev (set from runs/model.json "option_level").
+# 0: everything (clears, holes, overhangs, height, bumps, well, ready rows - up to gen 43)
+# 1: the cells it fills + clears, holes, overhangs      2: the cells + clears      3: the cells only
+# The aim is that Kev reads the outcome off the board itself; each level is reached once the previous one plays as well.
+OPTION_LEVEL = 0
+
+
+def cells_text(game: Game, p: Placement) -> str:
+    """The cells a placement fills, as the board text numbers them: column, then row (row 1 = the floor)."""
+    H = len(game.board)
+    return " ".join(f"{x}:{H - y}" for x, y in sorted(p.cells, key=lambda c: (c[0], -c[1])))
+
+
 def option_text(game: Game, p: Placement) -> str:
     f = game.features(p)
+    how = (", slide" if p.slide else "") + (", T-spin" if is_tspin(game.board, p) else "")
+    if OPTION_LEVEL >= 1:
+        head = f"rot {p.rotation}{how}, cells {cells_text(game, p)}"
+        if OPTION_LEVEL >= 3: return head
+        if OPTION_LEVEL == 2: return f"{head}: clears {f.lines}"
+        return f"{head}: clears {f.lines}, holes {f.enclosed} ({f.new_enclosed:+d}), overhangs {f.overhang} ({f.new_overhang:+d})"
     cols = sorted({x for x, _ in p.cells})
     span = f"col {cols[0]}" if len(cols) == 1 else f"cols {cols[0]}-{cols[-1]}"
-    how = (", slide" if p.slide else "") + (", T-spin" if is_tspin(game.board, p) else "")
     return (f"rot {p.rotation}, {span}{how}: clears {f.lines}, holes {f.enclosed} ({f.new_enclosed:+d}), "
             f"overhangs {f.overhang} ({f.new_overhang:+d}), height {f.max_height}, bumps {f.bumpiness}, "
             f"well {f.max_well}, ready {f.ready_rows}")

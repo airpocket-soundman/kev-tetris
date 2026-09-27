@@ -616,6 +616,11 @@ def run_loop(a, ctl: Control):
         same_rules = [x for x in gens if x.get("eval") and x.get("rules", 1) == RULES]   # scores under other rules don't compare
         if a.learner == "rl" and not a.demo and any(x.get("learner") == "rl" for x in mine):
             mine = [x for x in mine if x.get("learner") == "rl"]   # RL continues from generations whose value answers were trained
+        lv = getattr(a, "option_level", 0)
+        if any(x.get("option_level", 0) == lv for x in mine):
+            # a new option text level starts from the best generation so far, then continues within its own level (the
+            # scores drop right after each step: the older levels would otherwise always win)
+            mine = [x for x in mine if x.get("option_level", 0) == lv]
         if mine: pool = mine[-a.parent_window:]
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
         else: pool = same_rules or [x for x in gens if x.get("eval")]
@@ -772,7 +777,7 @@ def run_loop(a, ctl: Control):
             ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g),
                           parallel=a.test_parallel)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
-                 "rules": RULES, "teacher": bool(a.teacher) and not rl,
+                 "rules": RULES, "teacher": bool(a.teacher) and not rl, "option_level": getattr(a, "option_level", 0),
                  **({"learner": "rl", "value_means": means, "search": "kev" if rl_means else "hand"} if rl else {}),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
@@ -851,6 +856,10 @@ def main(argv=None):
     model_file = ROOT / "runs" / "model.json"
     if model_file.exists() and not a.demo:
         for k, v in json.loads(model_file.read_text(encoding="utf-8")).items(): setattr(a, k, v)
+
+    from . import interface
+    interface.OPTION_LEVEL = getattr(a, "option_level", 0)   # how much of each move's outcome Kev is told (interface.py)
+    print(f"option text level {interface.OPTION_LEVEL}", flush=True)
 
     set_command("run")
     ctl = Control()
