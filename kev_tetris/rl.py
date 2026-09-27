@@ -802,6 +802,9 @@ def run_loop(a, ctl: Control):
                 else:
                     moves.append(s.teacher_record)
             recs = moves + vrecs[:min(a.value_cap, len(moves))]
+            if a.imagine_mix:   # board-imagination probes keep training the predictions Kev now has to make itself
+                from . import imagine
+                recs += imagine.dataset(a.imagine_mix, 5000 + g, workers=a.rollout_workers)
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
                   f"level means {[round(m, 1) for m in means]}", flush=True)
@@ -913,6 +916,7 @@ def main(argv=None):
     ap.add_argument("--imagine", type=int, choices=[0, 1], default=0, help="board-imagination rounds before the weaning (docs/plan.md 5.9)")
     ap.add_argument("--imagine_n", type=int, default=1500, help="imagination probes per round")
     ap.add_argument("--imagine_moves", type=int, default=1500, help="the parent's move records kept in a round")
+    ap.add_argument("--imagine_mix", type=int, default=0, help="imagination probes added to each game generation's records")
     ap.add_argument("--imagine_eval", type=int, default=300, help="probes in the imagination test")
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
     ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")

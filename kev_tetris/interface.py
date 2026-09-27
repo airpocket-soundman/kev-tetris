@@ -32,7 +32,12 @@ INSTRUCTIONS_OWN = ("You are playing Tetris for a high score. Choose where to pl
 
 
 def instructions(level: int | None = None) -> str:
-    return INSTRUCTIONS_OWN if level_of(level) >= 3 else INSTRUCTIONS_FULL
+    # the strategy stays the same; without the computed outcomes Kev is only told to work them out itself
+    return INSTRUCTIONS_FULL + (OWN_NOTE if level_of(level) >= 3 else "")
+
+
+OWN_NOTE = (" Each option only gives the cells (column:row, row 1 = the floor) the piece would fill: picture the board "
+            "after it yourself - the rows that clear, empty cells it covers, the height, the well - before choosing.")
 
 
 def board_text(board, margin: int = 2) -> str:
