@@ -42,6 +42,7 @@ SAFE_HEIGHT = 10
 # v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
 TETRIS_READY = 4.0    # v5: a move that completes a Tetris setup (from gen 41)
 MISSED_TETRIS = 8.0
+IMAGINE_TARGETS = {"clears": 0.95, "covers": 0.9, "height": 0.8, "ready": 0.9}   # board imagination done
 OWN_LEVEL = 3   # option text without any computed outcome: only the cells a move fills (interface.option_text)   # v5: an I piece placed elsewhere while a Tetris was ready
 LINE_REWARD_CLEAN = {0: 0.0, 1: -3.0, 2: -3.0, 3: -1.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
@@ -527,6 +528,48 @@ def run_loop(a, ctl: Control):
     collapsed: set[int] = set()
     rng_ro = random.Random(a.seed + 7 if hasattr(a, "seed") and a.seed is not None else None)
 
+    def imagined(x):
+        """The board-imagination targets are met (docs/plan.md 5.9)."""
+        acc = x.get("imagine_acc")
+        return bool(acc) and all(acc[k]["acc"] >= t for k, t in IMAGINE_TARGETS.items())
+
+    def imagination_round(g, prev):
+        """A generation that learns to picture the board after a move instead of playing: probes with computed answers
+        (kev_tetris.imagine) plus the parent's move records (so it keeps playing), then the imagination test and the
+        usual game test."""
+        from . import imagine
+        t0 = time.time()
+        ctl.report(force=True, phase="train", gen=g, detail="盤面推論の問題を作成中", progress=None)
+        print(f"[gen {g}] board imagination round from gen {prev['gen']}", flush=True)
+        probes = [json.dumps(r, ensure_ascii=False) for r in imagine.dataset(a.imagine_n, 1000 + g, workers=a.rollout_workers)]
+        src = data_dir / f"gen-{prev['gen']:03d}.jsonl"
+        moves = [l for l in src.read_text(encoding="utf-8").splitlines() if l and '"move"' in l] if src.exists() else []
+        rng.shuffle(moves)
+        lines = probes + moves[:a.imagine_moves]
+        rng.shuffle(lines)
+        data = data_dir / f"gen-{g:03d}.jsonl"
+        data.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        out = runs / f"gen-{g:03d}"
+        if out.exists(): shutil.rmtree(out)
+        ctl.report(force=True, phase="train", detail=f"盤面推論 {len(probes)} 問 + 手 {len(lines) - len(probes)} 件で学習", progress=None)
+        wait_for_gpu(ctl, a.need_train_gb, "学習")
+        train_generation(data, prev["run"], out, a, ctl)
+        run = str(out.relative_to(ROOT)).replace("\\", "/")
+        ctl.report(force=True, phase="test", detail="盤面推論テスト", progress=0.0)
+        with serving(run) as srv:
+            acc = imagine.accuracy(srv.url, a.imagine_eval)
+            print(f"[gen {g}] imagination {acc}", flush=True)
+            ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), g, test_feed(g),
+                          parallel=a.test_parallel, level=0)
+        generations.upsert({"gen": g, "run": run, "parent": prev["gen"], "model": a.model_name, "reward": REWARD_VERSION,
+                            "rules": RULES, "teacher": False, "learner": "rl", "kind": "imagine", "imagine_acc": acc,
+                            "option_level": 0,
+                            "train": {"episodes": 0, "decisions": 0, "records": len(lines), "trained_on": len(lines),
+                                      "mean_lines": 0, "minutes": round((time.time() - t0) / 60, 1)},
+                            "eval": ev})
+        ctl.report(force=True, last_eval={"gen": g, **ev})
+        print(f"[gen {g}] eval {ev}", flush=True)
+
     def distill(g, gens):
         """Distillation into a new model (e.g. Kev-0.8B). The best generation so far (same rules) plays practice games,
         every position it meets gets the lookahead search's move as its label, the earlier teacher generations' records
@@ -630,7 +673,13 @@ def run_loop(a, ctl: Control):
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
         else: pool = same_rules or [x for x in gens if x.get("eval")]
         prev = max(pool, key=strength)
+        latest = max((x for x in gens if x.get("eval")), key=lambda x: x["gen"], default=None)
+        if a.imagine and latest and latest.get("kind") == "imagine" and not imagined(latest):
+            prev = latest   # board-imagination rounds continue from each other until the targets are met
         if a.generations and g > a.generations: break   # 0 = until stopped
+        if a.imagine and not a.demo and not imagined(prev) and not any(imagined(x) for x in gens):
+            imagination_round(g, prev)
+            continue
         rl = a.learner == "rl" and not a.demo
         # the parent's value levels, once an RL generation has trained them; before that (the first RL generation) the
         # lookahead search labels the moves and the value answers are only being learned
@@ -858,6 +907,10 @@ def main(argv=None):
     ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
     ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
+    ap.add_argument("--imagine", type=int, choices=[0, 1], default=0, help="board-imagination rounds before the weaning (docs/plan.md 5.9)")
+    ap.add_argument("--imagine_n", type=int, default=1500, help="imagination probes per round")
+    ap.add_argument("--imagine_moves", type=int, default=600, help="the parent's move records kept in a round")
+    ap.add_argument("--imagine_eval", type=int, default=300, help="probes in the imagination test")
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
     ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")
     ap.add_argument("--own_eval_games", type=int, default=3, help="weaning: test games without computed outcomes")
