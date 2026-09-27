@@ -40,13 +40,19 @@ OWN_NOTE = (" Each option only gives the cells (column:row, row 1 = the floor) t
             "after it yourself - the rows that clear, empty cells it covers, the height, the well - before choosing.")
 
 
+# The board as text. Spaced (from gen 60): one cell per token - "#########." merges into a few tokens and Kev had to
+# count characters inside them to tell which column is open (it missed Tetrises it could not see).
+BOARD_SPACED = False
+
+
 def board_text(board, margin: int = 2) -> str:
     H = len(board)                          # rules 3: hidden rows above the 20 visible ones
     top = next((y for y in range(H) if any(board[y])), H)
     start = max(0, top - margin)
-    rows = [f"{H - y:2d} |" + "".join("#" if c else "." for c in board[y]) + "|" for y in range(start, H)]
+    sep = " " if BOARD_SPACED else ""
+    rows = [f"{H - y:2d} |{sep}" + sep.join("#" if c else "." for c in board[y]) + f"{sep}|" for y in range(start, H)]
     head = f"(rows {H} to {H - start + 1} are empty)" if start > 0 else ""
-    cols = "    " + "".join(str(x) for x in range(WIDTH))
+    cols = ("     " if BOARD_SPACED else "    ") + sep.join(str(x) for x in range(WIDTH))
     return "\n".join(filter(None, [head, *rows, cols]))
 
 

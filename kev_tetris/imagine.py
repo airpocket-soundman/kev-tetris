@@ -75,7 +75,7 @@ def pick_move(game: Game, rng: random.Random):
     tetris = [p for p, f in feats if f.lines == 4]
     covering = [p for p, f in feats if f.lines == 0 and f.new_enclosed + f.new_overhang > 0]
     clean = [p for p, f in feats if f.lines == 0 and f.new_enclosed + f.new_overhang == 0]
-    pool = ((tetris or clearing) if r < 0.15 else clearing if r < 0.35 else covering if r < 0.5 else clean)
+    pool = ((tetris or clearing) if r < 0.3 else clearing if r < 0.45 else covering if r < 0.6 else clean)
     return rng.choice(pool or [p for p, _ in feats])
 
 
@@ -174,6 +174,9 @@ def accuracy(base_url: str, n: int = 300, timeout: float = 300) -> dict:
     return out
 
 
+DRILL_SHARE = 0.4   # Tetris drills among the records without outcomes (0.2 until gen 59, when Tetrises were still missed)
+
+
 def _own_moves(args):
     """Positions from the teacher's own games (its two-piece search, 10% random moves), each labelled with the
     teacher's move, as records without the computed outcomes (option level 3)."""
@@ -183,7 +186,7 @@ def _own_moves(args):
     rng, out = random.Random(seed), []
     while len(out) < n:
         g = Game(seed=rng.randrange(1 << 30))
-        if rng.random() < 0.2:
+        if rng.random() < DRILL_SHARE:
             # a Tetris drill (full rows around one well), often with an I piece in hand: finding the Tetris from the
             # board alone - without "clears 4" in the option text - is what the weaning games still lack
             drill = rl.make_drill(rng)

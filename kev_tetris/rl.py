@@ -985,7 +985,8 @@ def main(argv=None):
         for k, v in json.loads(model_file.read_text(encoding="utf-8")).items(): setattr(a, k, v)
 
     from . import interface
-    interface.OPTION_LEVEL = getattr(a, "option_level", 0)   # how much of each move's outcome Kev is told (interface.py)
+    interface.OPTION_LEVEL = getattr(a, "option_level", 0)
+    interface.BOARD_SPACED = bool(getattr(a, "board_spaced", 0))   # one cell per token (interface.board_text)   # how much of each move's outcome Kev is told (interface.py)
     print(f"option text level {interface.OPTION_LEVEL}", flush=True)
 
     set_command("run")
