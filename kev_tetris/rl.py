@@ -16,7 +16,7 @@ starts kev.serve for collection and evaluation and stops it before training.
 """
 from __future__ import annotations
 
-import copy, json, os, random, shutil, socket, statistics, subprocess, sys, threading, time
+import argparse, copy, json, os, random, shutil, socket, statistics, subprocess, sys, threading, time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -529,9 +529,14 @@ def run_loop(a, ctl: Control):
     rng_ro = random.Random(a.seed + 7 if hasattr(a, "seed") and a.seed is not None else None)
 
     def imagined(x):
-        """The board-imagination targets are met (docs/plan.md 5.9)."""
+        """The board-imagination targets are met (docs/plan.md 5.9), or the imagination rounds stopped improving: the
+        mean accuracy on the targeted questions rose less than a point over the last 3 rounds."""
         acc = x.get("imagine_acc")
-        return bool(acc) and all(acc[k]["acc"] >= t for k, t in IMAGINE_TARGETS.items())
+        if not acc: return False
+        if all(acc[k]["acc"] >= t for k, t in IMAGINE_TARGETS.items()): return True
+        score = lambda e: sum(e["imagine_acc"][k]["acc"] for k in IMAGINE_TARGETS) / len(IMAGINE_TARGETS)
+        chain = sorted((e for e in load() if e.get("kind") == "imagine" and e["gen"] <= x["gen"]), key=lambda e: e["gen"])
+        return len(chain) >= 4 and score(chain[-1]) - score(chain[-4]) < 0.01
 
     def imagination_round(g, prev):
         """A generation that learns to picture the board after a move instead of playing: probes with computed answers
@@ -541,7 +546,12 @@ def run_loop(a, ctl: Control):
         t0 = time.time()
         ctl.report(force=True, phase="train", gen=g, detail="盤面推論の問題を作成中", progress=None)
         print(f"[gen {g}] board imagination round from gen {prev['gen']}", flush=True)
-        probes = [json.dumps(r, ensure_ascii=False) for r in imagine.dataset(a.imagine_n, 1000 + g, workers=a.rollout_workers)]
+        # hard-example mining with the parent: the probes it gets wrong first
+        ctl.report(force=True, phase="train", detail="盤面推論: 苦手な問題を探しています", progress=None)
+        with serving(prev["run"]) as srv:
+            mined, errs = imagine.mined_dataset(srv.url, a.imagine_n, 1000 + g, workers=a.rollout_workers, pool=a.imagine_pool)
+        print(f"[gen {g}] imagination mining: parent error rates {errs}", flush=True)
+        probes = [json.dumps(r, ensure_ascii=False) for r in mined]
         # move records from the latest game generations (not the imagination rounds, whose files hold probes and reused
         # moves): gen 44 trained on 1500 probes + 600 moves and its tests fell from 500 to 221 pieces - as many moves as probes
         games = sorted((x["gen"] for x in load() if x.get("kind") != "imagine" and x.get("learner") == "rl"), reverse=True)[:3]
@@ -556,7 +566,7 @@ def run_loop(a, ctl: Control):
         if out.exists(): shutil.rmtree(out)
         ctl.report(force=True, phase="train", detail=f"盤面推論 {len(probes)} 問 + 手 {len(lines) - len(probes)} 件で学習", progress=None)
         wait_for_gpu(ctl, a.need_train_gb, "学習")
-        train_generation(data, prev["run"], out, a, ctl)
+        train_generation(data, prev["run"], out, argparse.Namespace(**{**vars(a), "epochs": a.imagine_epochs}), ctl)
         run = str(out.relative_to(ROOT)).replace("\\", "/")
         ctl.report(force=True, phase="test", detail="盤面推論テスト", progress=0.0)
         with serving(run) as srv:
@@ -914,8 +924,10 @@ def main(argv=None):
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
     ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
     ap.add_argument("--imagine", type=int, choices=[0, 1], default=0, help="board-imagination rounds before the weaning (docs/plan.md 5.9)")
-    ap.add_argument("--imagine_n", type=int, default=1500, help="imagination probes per round")
-    ap.add_argument("--imagine_moves", type=int, default=1500, help="the parent's move records kept in a round")
+    ap.add_argument("--imagine_n", type=int, default=2500, help="imagination probes per round")
+    ap.add_argument("--imagine_pool", type=int, default=2, help="candidate probes per kept one (hard-example mining)")
+    ap.add_argument("--imagine_epochs", type=int, default=2, help="epochs over an imagination round's probes")
+    ap.add_argument("--imagine_moves", type=int, default=0, help="move records kept in a round (0: imagination only)")
     ap.add_argument("--imagine_mix", type=int, default=0, help="imagination probes added to each game generation's records")
     ap.add_argument("--imagine_eval", type=int, default=300, help="probes in the imagination test")
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")

@@ -25,7 +25,14 @@ QUESTIONS = {
                "criteria": HEIGHT_BINS},
     "ready": {"type": "noul", "instructions": "After this move, would an I piece dropped upright into one column clear "
                                                "four rows at once?"},
+    # steps towards the harder answers (covers above all): where the piece ends up, what is right under it
+    "gap_under": {"type": "score", "instructions": "Once the piece has landed, how many empty cells are directly below "
+                                                    "its cells (counting each cell right under a piece cell)?",
+                  "criteria": ["none", "one", "two", "three", "four or more"]},
+    "low_row": {"type": "score", "instructions": "Which row does the lowest cell of the piece end up in?",
+                "criteria": ["rows 1-4", "rows 5-8", "rows 9-12", "rows 13-16", "row 17 or higher"]},
 }
+TARGETED = ("clears", "covers", "height", "ready")   # the answers a move choice needs (IMAGINE_TARGETS in rl.py)
 
 
 def height_bin(h: int) -> int:
@@ -37,8 +44,12 @@ def answers(game: Game, p) -> dict:
     f = game.features(p)
     board, _ = apply_placement(game.board, p, 1)
     after = board_features(board)
+    H, cells = len(game.board), set(p.cells)
+    gap = min(4, sum(1 for x, y in p.cells if y + 1 < H and (x, y + 1) not in cells and not game.board[y + 1][x]))
+    low = H - max(y for _, y in p.cells)                      # the row number of the piece's lowest cell (1 = floor)
     return {"clears": str(f.lines), "covers": (f.new_enclosed + f.new_overhang) > 0,
-            "height": height_bin(after["max_height"]), "ready": bool(after["tetris_ready"])}
+            "height": height_bin(after["max_height"]), "ready": bool(after["tetris_ready"]),
+            "gap_under": gap, "low_row": min(4, (low - 1) // 4)}
 
 
 def probe(game: Game, p, with_labels: bool = True) -> dict:
@@ -109,6 +120,40 @@ def dataset(n: int, seed: int, workers: int = 1) -> list[dict]:
 EVAL_SEED = 777
 
 
+def read(ans: dict) -> dict:
+    """Kev's answers to the probe questions, in the form of answers()."""
+    return {k: (v["choice"] if v["type"] == "choice" else v["noul"] >= 0.5 if v["type"] == "noul" else round(v["score"]))
+            for k, v in ans.items()}
+
+
+def ask(base_url: str, req: dict, timeout: float = 300) -> dict:
+    r = urllib.request.Request(f"{base_url.rstrip('/')}/v1/systemone", json.dumps({**req, "model": "kev-latest"}).encode(),
+                               {"content-type": "application/json"})
+    with urllib.request.urlopen(r, timeout=timeout) as resp: return json.load(resp)["answers"]
+
+
+def mined_dataset(base_url: str, n: int, seed: int, workers: int = 1, pool: int = 3) -> tuple[list[dict], dict]:
+    """Hard-example mining: pool x n candidate probes, Kev (the parent) answers them all; every probe it gets wrong on a
+    targeted question is kept, then as many it gets right (so the easy answers are not forgotten), up to n.
+    -> (labelled probes, the candidates' error rate per question)."""
+    from concurrent.futures import ThreadPoolExecutor
+    cands = positions(n * pool, seed, workers=workers)
+    def grade(gp):
+        g, p = gp
+        return read(ask(base_url, probe(g, p, with_labels=False))), answers(g, p)
+    with ThreadPoolExecutor(4) as ex: graded = list(ex.map(grade, cands))
+    wrong, right, errs = [], [], Counter()
+    for (g, p), (got, true) in zip(cands, graded):
+        bad = [k for k in QUESTIONS if got.get(k) != true[k]]
+        errs.update(bad)
+        (wrong if any(k in TARGETED for k in bad) else right).append(probe(g, p))
+    rng = random.Random(seed)
+    rng.shuffle(right)
+    out = wrong[:n] + right[:max(0, n - len(wrong[:n]))]
+    rng.shuffle(out)
+    return out, {k: round(errs[k] / len(cands), 3) for k in QUESTIONS}
+
+
 def accuracy(base_url: str, n: int = 300, timeout: float = 300) -> dict:
     """Kev's accuracy on a fixed set of probes, per question, next to always answering the most common label."""
     items = positions(n, EVAL_SEED)
@@ -119,8 +164,7 @@ def accuracy(base_url: str, n: int = 300, timeout: float = 300) -> dict:
                                    {"content-type": "application/json"})
         with urllib.request.urlopen(r, timeout=timeout) as resp: ans = json.load(resp)["answers"]
         true = answers(g, p)
-        got = {"clears": ans["clears"]["choice"], "covers": ans["covers"]["noul"] >= 0.5,
-               "height": round(ans["height"]["score"]), "ready": ans["ready"]["noul"] >= 0.5}
+        got = read(ans)
         for k in QUESTIONS:
             right[k] += got[k] == true[k]; truth[k].append(true[k])
     out = {}
