@@ -690,7 +690,11 @@ def run_loop(a, ctl: Control):
         if weaning and not a.demo:
             # while weaning, the lineage continues within the weaning generations, chosen by how well they play without
             # the computed outcomes (gen 51 went back to gen 46 by the full test and lost gen 50's weaning)
-            prev = max(weaning[-a.parent_window:], key=lambda x: (x["eval_own"].get("score_per_piece", 0), strength(x)))
+            own = lambda x: x["eval_own"].get("score_per_piece", 0)
+            best = max(weaning[-a.parent_window:], key=lambda x: (own(x), strength(x)))
+            # the latest one continues the lineage unless it is clearly worse: the own-judgement test is a few games, and
+            # picking its maximum kept going back to one lucky generation (gens 56-58 all restarted from gen 55)
+            prev = weaning[-1] if own(weaning[-1]) >= own(best) - a.own_tolerance else best
         latest = max((x for x in gens if x.get("eval")), key=lambda x: x["gen"], default=None)
         if a.imagine and latest and latest.get("kind") == "imagine" and not imagined(latest):
             prev = latest   # board-imagination rounds continue from each other until the targets are met
@@ -945,7 +949,8 @@ def main(argv=None):
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
     ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")
     ap.add_argument("--own_extra", type=int, default=2500, help="weaning: teacher-labelled records without computed outcomes made on the CPU per generation")
-    ap.add_argument("--own_eval_games", type=int, default=3, help="weaning: test games without computed outcomes")
+    ap.add_argument("--own_tolerance", type=float, default=3.0, help="weaning: the latest generation stays the parent within this many points of the best own-judgement score")
+    ap.add_argument("--own_eval_games", type=int, default=5, help="weaning: test games without computed outcomes")
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
