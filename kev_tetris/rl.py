@@ -542,8 +542,11 @@ def run_loop(a, ctl: Control):
         ctl.report(force=True, phase="train", gen=g, detail="盤面推論の問題を作成中", progress=None)
         print(f"[gen {g}] board imagination round from gen {prev['gen']}", flush=True)
         probes = [json.dumps(r, ensure_ascii=False) for r in imagine.dataset(a.imagine_n, 1000 + g, workers=a.rollout_workers)]
-        src = data_dir / f"gen-{prev['gen']:03d}.jsonl"
-        moves = [l for l in src.read_text(encoding="utf-8").splitlines() if l and '"move"' in l] if src.exists() else []
+        # move records from the latest game generations (not the imagination rounds, whose files hold probes and reused
+        # moves): gen 44 trained on 1500 probes + 600 moves and its tests fell from 500 to 221 pieces - as many moves as probes
+        games = sorted((x["gen"] for x in load() if x.get("kind") != "imagine" and x.get("learner") == "rl"), reverse=True)[:3]
+        moves = [l for k in games for src in [data_dir / f"gen-{k:03d}.jsonl"] if src.exists()
+                 for l in src.read_text(encoding="utf-8").splitlines() if l and '"move"' in l]
         rng.shuffle(moves)
         lines = probes + moves[:a.imagine_moves]
         rng.shuffle(lines)
@@ -909,7 +912,7 @@ def main(argv=None):
     ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
     ap.add_argument("--imagine", type=int, choices=[0, 1], default=0, help="board-imagination rounds before the weaning (docs/plan.md 5.9)")
     ap.add_argument("--imagine_n", type=int, default=1500, help="imagination probes per round")
-    ap.add_argument("--imagine_moves", type=int, default=600, help="the parent's move records kept in a round")
+    ap.add_argument("--imagine_moves", type=int, default=1500, help="the parent's move records kept in a round")
     ap.add_argument("--imagine_eval", type=int, default=300, help="probes in the imagination test")
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
     ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")
