@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 
 from . import generations, kevenv, live, proc, replays, teacher
+from . import interface
 from .interface import VALUE_QUESTION, to_record, to_value_request
 from .policy import GATE, KevPolicy, KevServer, is_front, set_front
 from .search import KevSearchPolicy, teacher_rollout
@@ -40,7 +41,8 @@ LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
 # v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
 TETRIS_READY = 4.0    # v5: a move that completes a Tetris setup (from gen 41)
-MISSED_TETRIS = 8.0   # v5: an I piece placed elsewhere while a Tetris was ready
+MISSED_TETRIS = 8.0
+OWN_LEVEL = 3   # option text without any computed outcome: only the cells a move fills (interface.option_text)   # v5: an I piece placed elsewhere while a Tetris was ready
 LINE_REWARD_CLEAN = {0: 0.0, 1: -3.0, 2: -3.0, 3: -1.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
@@ -127,6 +129,7 @@ class Step:
     value_request: dict | None = None    # "how good is this board" on this position, next piece unknown (RL)
     source: str | None = None            # where the label came from when not the teacher, e.g. "rollout"
     tetris_key: str | None = None        # an I piece could clear 4 rows here and did not: the Tetris move (a bad move)
+    own_request: dict | None = None      # the same position without the computed outcomes (OWN_LEVEL), for weaning
 
 
 @dataclass
@@ -205,7 +208,7 @@ def value_features(f: dict) -> list[float]:
 
 
 def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None, board=None, search=None,
-                 values: bool = False) -> Episode:
+                 values: bool = False, own: bool = False) -> Episode:
     """on_step(game, decision) after every move; on_move(event) gets the move as the stream screen draws it.
     board: a starting board (a Tetris drill) instead of an empty one. A decision carrying `label` (Kev's own search,
     RL) is its own teacher. values: keep each position's value question for value labels."""
@@ -215,7 +218,8 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
     while not game.over and game.pieces < max_pieces:
         placements = game.placements()
         d = policy.decide(game)
-        rec = to_record(game, placements, d.placement.key)
+        rec = to_record(game, placements, d.placement.key, level=0 if own else None)
+        own_req = to_record(game, placements, d.placement.key, level=OWN_LEVEL) if own else None
         t_rec, agrees, source = None, True, None
         vreq = {k: v for k, v in to_value_request(game).items() if k != "model"} if values else None
         own = getattr(d, "label", None)
@@ -236,7 +240,8 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
         ep.steps.append(Step(rec, r, value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0,
-                             teacher_record=t_rec, agrees=agrees, value_request=vreq, source=source, tetris_key=missed))
+                             teacher_record=t_rec, agrees=agrees, value_request=vreq, source=source, tetris_key=missed,
+                             own_request=own_req))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
@@ -366,7 +371,7 @@ class Showcase:
 
 
 def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen: int | None = None, on_move=None,
-             parallel: int = 1) -> dict:
+             parallel: int = 1, level: int | None = None) -> dict:
     """Greedy games on fixed seeds. With replay_gen the games are saved for the stream screen (kev_tetris.replays).
     policy: a policy, or a zero-argument factory giving one per game (needed when games run in parallel)."""
     show = Showcase()
@@ -374,7 +379,7 @@ def evaluate(policy, seeds: list[int], max_pieces: int, on_step=None, replay_gen
 
     def job(i, s):
         def run():
-            show.start(i); set_front(show.shown(i))
+            show.start(i); set_front(show.shown(i)); interface.set_level(level)
             def step(game, d):
                 set_front(show.shown(i))
                 if on_step: on_step(i, game)
@@ -633,6 +638,14 @@ def run_loop(a, ctl: Control):
         # choices were noise and practice games lasted ~40 pieces), and never right after a collapsed attempt
         n_rl = sum(1 for x in gens if x.get("learner") == "rl")
         rl_means = prev.get("value_means") if rl and n_rl >= a.value_warmup and g not in collapsed else None
+        # weaning off the computed outcomes (docs/plan.md 5.9): the share of games and records without them grows by
+        # 0.25 once the parent's own-judgement test reached own_advance of its full test
+        share = prev.get("own_share")
+        if share is None: share = a.own_share_start
+        elif (prev.get("eval_own") or {}).get("score_per_piece", 0) >= a.own_advance * prev["eval"]["score_per_piece"]:
+            share = min(1.0, share + 0.25)
+        if a.demo or not rl: share = 0.0
+        if share: print(f"[gen {g}] own-judgement share {share:.2f}", flush=True)
         t0 = time.time()
 
         ctl.report(force=True, phase="collect", gen=g, detail=f"第{prev['gen']}世代 を読み込み中", progress=0.0)
@@ -658,7 +671,7 @@ def run_loop(a, ctl: Control):
                 return key
             if not ((a.teacher or rl) and not a.demo and not rl_means): search = None
 
-            def practice_job(i, seed, drill, pol):
+            def practice_job(i, seed, drill, pol, own_game=False):
                 def on_step(game, d):
                     ctl.checkpoint()
                     set_front(show.shown(i))
@@ -670,9 +683,10 @@ def run_loop(a, ctl: Control):
                         feed.publish({"gen": prev["gen"], "phase": "practice", "game": i + 1, "games": a.episodes,
                                       "max_pieces": a.max_pieces, "training_gen": g, "parallel": a.parallel}, ev)
                 def run():
-                    show.start(i); set_front(show.shown(i))
+                    show.start(i); set_front(show.shown(i)); interface.set_level(OWN_LEVEL if own_game else 0)
                     try:
-                        ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search, values=rl)
+                        ep = play_episode(pol, seed, a.max_pieces, on_step, on_move, board=drill, search=search, values=rl,
+                                          own=share > 0)
                     finally:
                         show.end(i)
                     done.append(i); pieces_now[i] = a.max_pieces
@@ -681,7 +695,8 @@ def run_loop(a, ctl: Control):
             jobs = []
             for i in range(a.episodes):   # seeds, drills and policies drawn here, in order: runs stay reproducible
                 drill = make_drill(rng) if a.drill_frac and rng.random() < a.drill_frac else None
-                jobs.append(practice_job(i, rng.randrange(1 << 30), drill, policy(srv, prev["gen"], a.temperature)))
+                own_game = share > 0 and rng.random() < share
+                jobs.append(practice_job(i, rng.randrange(1 << 30), drill, policy(srv, prev["gen"], a.temperature), own_game))
             eps = run_games(a.parallel, jobs)
         if rl_means and statistics.mean(e.pieces for e in eps) < a.collapse_pieces:
             print(f"[gen {g}] Kev's search collapsed (mean {statistics.mean(e.pieces for e in eps):.0f} pieces): "
@@ -710,19 +725,30 @@ def run_loop(a, ctl: Control):
             for s in pool:   # a missed Tetris: whatever the teacher or the rollouts said, the Tetris is the answer
                 if s.tetris_key:
                     s.teacher_record = {**s.record, "questions": {"move": {**s.record["questions"]["move"], "label": s.tetris_key}}}
-            missed = [s.teacher_record for s in pool if s.tetris_key]
+            missed = [s for s in pool if s.tetris_key]
             if missed: print(f"[gen {g}] missed Tetrises: {len(missed)} (trained x3)", flush=True)
             pool = [s for s in pool if not s.tetris_key]
-            rolled = [s.teacher_record for s in pool if s.source == "rollout"]
-            diff = [s.teacher_record for s in pool if not s.agrees and not s.source]
-            same = [s.teacher_record for s in pool if s.agrees and not s.source]
+            rolled = [s for s in pool if s.source == "rollout"]
+            diff = [s for s in pool if not s.agrees and not s.source]
+            same = [s for s in pool if s.agrees and not s.source]
             rng.shuffle(diff); rng.shuffle(same)
             if ro["n"]: print(f"[gen {g}] rollouts: {ro['n']} positions, same as the teacher {ro['same']}", flush=True)
             vrecs, means = value_records(eps, a.gamma)
             vrecs = [r for r in vrecs if fits(r)]; rng.shuffle(vrecs)
             # moves filled up to teacher_cap with agreements: with Kev's own search few moves differ (gen 29: 129), and
             # a set of mostly value records (279 moves vs 1200 values) let the move answers drift - 207 pieces in the test
-            moves = missed * 3 + (rolled + diff + same)[:max(a.teacher_cap, len(rolled))]
+            chosen = missed * 3 + (rolled + diff + same)[:max(a.teacher_cap, len(rolled))]
+            moves = []
+            for s in chosen:
+                if s.own_request:
+                    # weaning: the same position without the computed outcomes, with the same answer - what Kev picks
+                    # with the outcomes spelled out it learns to pick from the board alone. The spelled-out copy stays
+                    # for a share of the positions that shrinks as own_share grows
+                    label = s.teacher_record["questions"]["move"]["label"]
+                    moves.append({**s.own_request, "questions": {"move": {**s.own_request["questions"]["move"], "label": label}}})
+                    if rng.random() >= share: moves.append(s.teacher_record)
+                else:
+                    moves.append(s.teacher_record)
             recs = moves + vrecs[:min(a.value_cap, len(moves))]
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
@@ -773,11 +799,19 @@ def run_loop(a, ctl: Control):
 
         run = f"demo:{g}" if a.demo else str(out.relative_to(ROOT)).replace("\\", "/")
         ctl.report(force=True, phase="test", detail=f"第{g}世代 を読み込み中", progress=0.0)
+        ev_own = None
         with serving(run) as srv:
+            # the test: with the computed outcomes until the weaning is done, then without; while weaning, a few more
+            # games without them measure how far Kev judges the board on its own
             ev = evaluate(lambda: policy(srv, g), eval_seeds, a.eval_max_pieces, tester(g), None if a.demo else g, test_feed(g),
-                          parallel=a.test_parallel)
+                          parallel=a.test_parallel, level=OWN_LEVEL if share >= 1 else 0)
+            if 0 < share < 1:
+                ev_own = evaluate(lambda: policy(srv, g), eval_seeds[:a.own_eval_games], a.eval_max_pieces, tester(g), None,
+                                  test_feed(g), parallel=a.test_parallel, level=OWN_LEVEL)
+                print(f"[gen {g}] own-judgement test {ev_own}", flush=True)
         entry = {"gen": g, "run": run, "parent": prev["gen"], "model": prev.get("model", a.model_name), "reward": REWARD_VERSION,
-                 "rules": RULES, "teacher": bool(a.teacher) and not rl, "option_level": getattr(a, "option_level", 0),
+                 "rules": RULES, "teacher": bool(a.teacher) and not rl, "option_level": OWN_LEVEL if share >= 1 else getattr(a, "option_level", 0),
+                 **({"own_share": share, "eval_own": ev_own} if share else {}),
                  **({"learner": "rl", "value_means": means, "search": "kev" if rl_means else "hand"} if rl else {}),
                  "train": {"episodes": len(eps), "decisions": sum(len(e.steps) for e in eps), "records": len(recs),
                            "trained_on": n_merged, "mean_lines": round(statistics.mean(e.lines for e in eps), 2),
@@ -824,6 +858,9 @@ def main(argv=None):
     ap.add_argument("--value_warmup", type=int, default=3, help="RL: generations of value labels before Kev's own search")
     ap.add_argument("--collapse_pieces", type=float, default=150, help="RL: practice mean pieces below which Kev's search is dropped for the generation")
     ap.add_argument("--rollout_rate", type=float, default=0.0, help="RL: share of practice positions labelled by Kev's own rollouts")
+    ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
+    ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")
+    ap.add_argument("--own_eval_games", type=int, default=3, help="weaning: test games without computed outcomes")
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")

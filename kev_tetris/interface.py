@@ -10,6 +10,8 @@ what it is asked at play time.
 """
 from __future__ import annotations
 
+import threading
+
 from .tetris import HEIGHT, WIDTH, Game, Placement, board_features, is_tspin
 
 INSTRUCTIONS_FULL = ("You are playing Tetris for a high score. Choose where to place the current piece. A Tetris (4 lines "
@@ -29,8 +31,8 @@ INSTRUCTIONS_OWN = ("You are playing Tetris for a high score. Choose where to pl
                     "A stack reaching the top loses the game.")
 
 
-def instructions() -> str:
-    return INSTRUCTIONS_OWN if OPTION_LEVEL >= 3 else INSTRUCTIONS_FULL
+def instructions(level: int | None = None) -> str:
+    return INSTRUCTIONS_OWN if level_of(level) >= 3 else INSTRUCTIONS_FULL
 
 
 def board_text(board, margin: int = 2) -> str:
@@ -48,7 +50,7 @@ VALUE_QUESTION = {"type": "score", "instructions": "How good is this board for t
                   "points and the risk of losing?", "criteria": VALUE_LEVELS}
 
 
-def state_text(game: Game, next_known: bool = True) -> str:
+def state_text(game: Game, next_known: bool = True, level: int | None = None) -> str:
     """next_known=False: the board after a move, before its next piece is drawn (Kev's own lookahead): the piece that
     comes after the current one is not known yet, and the text says so."""
     f = board_features(game.board)
@@ -58,7 +60,7 @@ def state_text(game: Game, next_known: bool = True) -> str:
             f"{board_text(game.board)}\n"
             f"Current piece: {game.current}. Next piece: {game.next if next_known else 'unknown'}.\n"
             f"Column heights: {' '.join(map(str, f['heights']))}. "
-            + (f"Holes: {f['holes']}. " if OPTION_LEVEL < 2 else "")   # from level 2 Kev judges holes from the board itself
+            + (f"Holes: {f['holes']}. " if level_of(level) < 2 else "")   # from level 2 Kev judges holes from the board itself
             + f"Lines cleared so far: {game.lines}.")
 
 
@@ -68,6 +70,19 @@ def state_text(game: Game, next_known: bool = True) -> str:
 # 3: the cells only. The board itself is always shown; judging it is Kev's job
 # The aim is that Kev reads the outcome off the board itself; each level is reached once the previous one plays as well.
 OPTION_LEVEL = 0
+_local = threading.local()
+
+
+def set_level(level: int | None) -> None:
+    """The option text level of the calling thread's game (None: OPTION_LEVEL). Lets games with and without the
+    computed outcomes run side by side while Kev is weaned off them."""
+    _local.level = level
+
+
+def level_of(level: int | None = None) -> int:
+    if level is not None: return level
+    lv = getattr(_local, "level", None)
+    return OPTION_LEVEL if lv is None else lv
 
 
 def cells_text(game: Game, p: Placement) -> str:
@@ -76,13 +91,14 @@ def cells_text(game: Game, p: Placement) -> str:
     return " ".join(f"{x}:{H - y}" for x, y in sorted(p.cells, key=lambda c: (c[0], -c[1])))
 
 
-def option_text(game: Game, p: Placement) -> str:
+def option_text(game: Game, p: Placement, level: int | None = None) -> str:
+    level = level_of(level)
     f = game.features(p)
     how = (", slide" if p.slide else "") + (", T-spin" if is_tspin(game.board, p) else "")
-    if OPTION_LEVEL >= 1:
+    if level >= 1:
         head = f"rot {p.rotation}{how}, cells {cells_text(game, p)}"
-        if OPTION_LEVEL >= 3: return head
-        if OPTION_LEVEL == 2: return f"{head}: clears {f.lines}"
+        if level >= 3: return head
+        if level == 2: return f"{head}: clears {f.lines}"
         return f"{head}: clears {f.lines}, holes {f.enclosed} ({f.new_enclosed:+d}), overhangs {f.overhang} ({f.new_overhang:+d})"
     cols = sorted({x for x, _ in p.cells})
     span = f"col {cols[0]}" if len(cols) == 1 else f"cols {cols[0]}-{cols[-1]}"
@@ -91,13 +107,14 @@ def option_text(game: Game, p: Placement) -> str:
             f"well {f.max_well}, ready {f.ready_rows}")
 
 
-def to_request(game: Game, placements: list[Placement] | None = None, model: str = "kev-latest", value: bool = False) -> dict:
+def to_request(game: Game, placements: list[Placement] | None = None, model: str = "kev-latest", value: bool = False,
+               level: int | None = None) -> dict:
     """The move question; value=True adds "how good is this board" (a Score question) to the same pass."""
     placements = placements if placements is not None else game.placements()
-    qs = {"move": {"type": "choice", "instructions": instructions(),
-                   "criteria": {p.key: option_text(game, p) for p in placements}}}
+    qs = {"move": {"type": "choice", "instructions": instructions(level),
+                   "criteria": {p.key: option_text(game, p, level) for p in placements}}}
     if value: qs["value"] = dict(VALUE_QUESTION)
-    return {"state": state_text(game), "model": model, "questions": qs}
+    return {"state": state_text(game, level=level), "model": model, "questions": qs}
 
 
 def to_value_request(game: Game, model: str = "kev-latest") -> dict:
@@ -105,9 +122,10 @@ def to_value_request(game: Game, model: str = "kev-latest") -> dict:
     return {"state": state_text(game, next_known=False), "model": model, "questions": {"value": dict(VALUE_QUESTION)}}
 
 
-def to_record(game: Game, placements: list[Placement], label: str, value_label: int | None = None) -> dict:
+def to_record(game: Game, placements: list[Placement], label: str, value_label: int | None = None,
+              level: int | None = None) -> dict:
     """A labelled training record in kev.data.load_records' format (value_label: the board's value level, 0-4)."""
-    req = to_request(game, placements, value=value_label is not None)
+    req = to_request(game, placements, value=value_label is not None, level=level)
     req.pop("model")
     req["questions"]["move"]["label"] = label
     if value_label is not None: req["questions"]["value"]["label"] = int(value_label)
