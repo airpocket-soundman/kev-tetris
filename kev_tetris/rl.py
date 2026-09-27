@@ -88,6 +88,14 @@ class Control:
         self.status = {"state": "running", "phase": "", "gen": None, "detail": "", "progress": None}
         self.lock = threading.RLock()   # games run in parallel threads and all report here
         self.last = 0.0
+        # heartbeat: long CPU phases (rollouts, record making) report nothing for minutes, and the stream screen took
+        # 60 s without an update for a stopped loop ("休止中" during gen 59's rollouts)
+        threading.Thread(target=self._beat, daemon=True).start()
+
+    def _beat(self):
+        while True:
+            time.sleep(20)
+            if self.status.get("state") in ("running", "paused"): self.report(force=True)
 
     def report(self, force: bool = False, **kw):
         with self.lock: self._report(force, **kw)
