@@ -39,6 +39,7 @@ LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
 # v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
+MISSED_TETRIS = 8.0   # v5: an I piece placed elsewhere while a Tetris was ready
 LINE_REWARD_CLEAN = {0: 0.0, 1: -3.0, 2: -3.0, 3: -1.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
 CONTROL = ROOT / "runs" / "rl_control.json"   # written by the control page: {"command": "run" | "pause" | "stop"}
@@ -124,6 +125,7 @@ class Step:
     agrees: bool = True                  # the search picked the move that was played
     value_request: dict | None = None    # "how good is this board" on this position, next piece unknown (RL)
     source: str | None = None            # where the label came from when not the teacher, e.g. "rollout"
+    tetris_key: str | None = None        # an I piece could clear 4 rows here and did not: the Tetris move (a bad move)
 
 
 @dataclass
@@ -219,13 +221,17 @@ def play_episode(policy, seed: int, max_pieces: int, on_step=None, on_move=None,
             t_rec = rec if agrees else {**rec, "questions": {"move": {**rec["questions"]["move"], "label": key}}}
         before = board_features(game.board)
         pre, piece = [row[:] for row in game.board], game.current
+        tetris_at = next((p.key for p in placements if game.features(p).lines == 4), None) if piece == "I" else None
         cleared = game.step(d.placement)
+        missed = tetris_at if tetris_at and cleared != 4 else None
         if on_move: on_move(live.move_event(game, pre, placements, d, piece))
         after = board_features(game.board)
-        ep.steps.append(Step(rec, shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b), value_features(before),
+        # a Tetris left on the table is a bad move (v5, from gen 41): the I went elsewhere while 4 rows were ready
+        r = shaped_reward(before, after, cleared, game.over, game.last_tspin, game.b2b) - (MISSED_TETRIS if missed else 0.0)
+        ep.steps.append(Step(rec, r, value_features(before),
                              phi_before=potential(before), phi_after=potential(after), tetris=cleared == 4,
                              new_enclosed=after["enclosed"] - before["enclosed"] if not cleared else 0,
-                             teacher_record=t_rec, agrees=agrees, value_request=vreq, source=source))
+                             teacher_record=t_rec, agrees=agrees, value_request=vreq, source=source, tetris_key=missed))
         ep.moves.append(replays.move_record(d))
         if on_step: on_step(game, d)
     ep.lines, ep.score, ep.pieces, ep.died, ep.tetrises, ep.rules = game.lines, game.score, game.pieces, game.over, game.tetrises, game.rules
@@ -490,6 +496,7 @@ def run_loop(a, ctl: Control):
         # that clears lines is never masked (gen 37: an I into a deep well cleared 3 rows but left one hole, the mask
         # hid it and the stack topped out), and a stack above SAFE_HEIGHT is not masked at all
         high = lambda game: board_features(game.board)["max_height"] > SAFE_HEIGHT
+        tetris_ready = lambda game: game.current == "I" and any(game.features(p).lines == 4 for p in game.placements())
         allow = (lambda game, ps: None if rng.random() < a.hole_free_eps or high(game) else
                  [p for p in ps if (f := game.features(p)).new_enclosed <= 0 or f.lines > 0]) if temperature > 0 else None
         if temperature > 0 and rl_means:   # RL practice: Kev's own lookahead, judged by Kev's own value answers
@@ -498,7 +505,7 @@ def run_loop(a, ctl: Control):
                                    value_scale=(rl_means[-1] - rl_means[0]) / 4)
         # no exploration above SAFE_HEIGHT: a high stack is played for survival with Kev's best move
         return KevPolicy(srv.url, temperature=temperature, seed=rng.randrange(1 << 30), allow=allow,
-                         explore=a.explore, top_k=a.top_k, explore_if=lambda game: not high(game))
+                         explore=a.explore, top_k=a.top_k, explore_if=lambda game: not high(game) and not tetris_ready(game))
 
     feed = live.Feed()   # every move played here also goes to the stream screen
 
@@ -690,6 +697,12 @@ def run_loop(a, ctl: Control):
             # first; plus value labels from the returns the games actually produced
             fits = lambda r: r and len(json.dumps(r)) <= MAX_RECORD_CHARS
             pool = [s for e in eps for s in e.steps if fits(s.teacher_record)]
+            for s in pool:   # a missed Tetris: whatever the teacher or the rollouts said, the Tetris is the answer
+                if s.tetris_key:
+                    s.teacher_record = {**s.record, "questions": {"move": {**s.record["questions"]["move"], "label": s.tetris_key}}}
+            missed = [s.teacher_record for s in pool if s.tetris_key]
+            if missed: print(f"[gen {g}] missed Tetrises: {len(missed)} (trained x3)", flush=True)
+            pool = [s for s in pool if not s.tetris_key]
             rolled = [s.teacher_record for s in pool if s.source == "rollout"]
             diff = [s.teacher_record for s in pool if not s.agrees and not s.source]
             same = [s.teacher_record for s in pool if s.agrees and not s.source]
@@ -699,7 +712,7 @@ def run_loop(a, ctl: Control):
             vrecs = [r for r in vrecs if fits(r)]; rng.shuffle(vrecs)
             # moves filled up to teacher_cap with agreements: with Kev's own search few moves differ (gen 29: 129), and
             # a set of mostly value records (279 moves vs 1200 values) let the move answers drift - 207 pieces in the test
-            moves = (rolled + diff + same)[:max(a.teacher_cap, len(rolled))]
+            moves = missed * 3 + (rolled + diff + same)[:max(a.teacher_cap, len(rolled))]
             recs = moves + vrecs[:min(a.value_cap, len(moves))]
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
