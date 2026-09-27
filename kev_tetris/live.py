@@ -6,7 +6,7 @@ runs/rl_live.json holds the latest move; the stream polls it.
 """
 from __future__ import annotations
 
-import json, os, time
+import json, threading, os, time
 from pathlib import Path
 
 from .tetris import PIECES, Game
@@ -34,15 +34,26 @@ def move_event(game: Game, pre: list, placements: list, d, piece: str) -> dict:
 class Feed:
     """Writer side (the training loop)."""
 
-    def __init__(self, path: Path = FEED):
-        self.path, self.seq = path, 0
+    def __init__(self, path: Path = FEED, keep: int = 30, test_interval: float = 0.4):
+        # keep: the latest moves stay in the file, so a reader polling slower than the moves come loses none of them.
+        # test_interval: a test move is published no sooner than this after the previous one (the test game waits):
+        # the stream draws every test move instead of jumping several at once (the 0.8B answers in ~0.2 s)
+        self.path, self.seq, self.recent, self.keep = path, 0, [], keep
+        self.test_interval, self.last_test = test_interval, 0.0
+        self.lock = threading.Lock()
 
     def publish(self, info: dict, move: dict):
-        self.seq += 1
+        if info.get("phase") == "test" and self.test_interval:
+            wait = self.last_test + self.test_interval - time.time()
+            if wait > 0: time.sleep(wait)
+            self.last_test = time.time()
+        with self.lock:
+            self.seq += 1
+            self.recent = (self.recent + [{"seq": self.seq, "info": info, "move": move}])[-self.keep:]
+            body = {"seq": self.seq, "pid": os.getpid(), "at": time.time(), "info": info, "move": move, "recent": self.recent}
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps({"seq": self.seq, "pid": os.getpid(), "at": time.time(), "info": info, "move": move},
-                                  ensure_ascii=False), encoding="utf-8")
+        tmp = self.path.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
         for _ in range(20):   # Windows: the reader may hold the file for a moment
             try: os.replace(tmp, self.path); return
             except PermissionError: time.sleep(0.01)

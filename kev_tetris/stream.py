@@ -342,11 +342,17 @@ def follow_training(hub, a, stop, load_gens):
                 gens = progress.gens_event(load_gens())["gens"]
                 gens = [g for g in gens if g["gen"] != info["gen"]] + [provisional(info["gen"], test_games)]
                 hub.publish("gens", {"gens": sorted(gens, key=lambda g: g["gen"])})
-        # at most ~2 moves a second reach the page: OBS renders the page and encodes on the GPU Kev is busy with
-        if (data["pid"], data["seq"]) != last_seq and time.time() - last_sent >= a.relay_interval:
+        # at most ~2 moves a second reach the page: OBS renders the page and encodes on the GPU Kev is busy with.
+        # Every move is relayed in order from the feed's recent list (tests are paced to that rate by the trainer); a
+        # backlog beyond `relay_backlog` (fast practice games) skips ahead to the latest moves
+        recent = data.get("recent") or [{"seq": data["seq"], "info": data["info"], "move": data["move"]}]
+        pending = [r for r in recent if last_seq is None or last_seq[0] != data["pid"] or r["seq"] > last_seq[1]]
+        if len(pending) > a.relay_backlog: pending = pending[-a.relay_backlog:]
+        if pending and time.time() - last_sent >= a.relay_interval:
+            r = pending[0]
             last_sent = time.time()
-            last_seq = (data["pid"], data["seq"])
-            info, mv = data["info"], data["move"]
+            last_seq = (data["pid"], r["seq"])
+            info, mv = r["info"], r["move"]
             key = (data["pid"], info["gen"], info["phase"], info["game"])
             if key != last_key:
                 last_key = key
@@ -470,6 +476,7 @@ def main(argv=None):
     ap.add_argument("--train_launcher", choices=["local", "docker"], default="local", help="where 学習開始 starts the loop: this Python, or the kev service of docker-compose.yml")
     ap.add_argument("--train_args", default="--generations 0", help="arguments for kev_tetris.rl when the control page starts training")
     ap.add_argument("--pieces_per_gen", type=int, default=150, help="a generation's turn ends after this many pieces (or game over)")
+    ap.add_argument("--relay_backlog", type=int, default=6, help="relayed training moves may lag this many behind before skipping ahead")
     ap.add_argument("--relay_interval", type=float, default=0.35, help="seconds between relayed training moves (lower = smoother, heavier for OBS)")
     ap.add_argument("--move_delay", type=float, default=0.18, help="seconds per move, so viewers can follow")
     ap.add_argument("--pause", type=float, default=3.0, help="seconds to show a generation's result before the switch")
