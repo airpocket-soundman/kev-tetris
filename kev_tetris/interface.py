@@ -12,12 +12,25 @@ from __future__ import annotations
 
 from .tetris import HEIGHT, WIDTH, Game, Placement, board_features, is_tspin
 
-INSTRUCTIONS = ("You are playing Tetris for a high score. Choose where to place the current piece. A Tetris (4 lines "
+INSTRUCTIONS_FULL = ("You are playing Tetris for a high score. Choose where to place the current piece. A Tetris (4 lines "
                 "at once) scores far more than single lines: stack flat, keep one column open as a deep well, and fill it "
                 "with an I piece. Keep exactly one well: other deep gaps are dangerous. Keep the stack at about half the "
                 "board height or lower. Enclosed holes are very bad; overhangs can still be filled by sliding a piece under "
                 "them. When a hole or an overhang appears, repair it at once, then go back to building for a Tetris. "
                 "A stack reaching the top loses the game.")
+# from option level 3 each option only says where the piece goes: Kev imagines the board after it and judges it itself
+INSTRUCTIONS_OWN = ("You are playing Tetris for a high score. Choose where to place the current piece. Each option gives "
+                    "the cells (column:row, row 1 = the floor) the piece would fill. For each option, picture the board "
+                    "after placing it: which rows become full and clear, whether it covers empty cells (holes and "
+                    "overhangs), how high and how flat the stack gets, and whether one column stays open as a well. "
+                    "A Tetris (4 lines at once with an I piece in the well) scores far more than single lines, so build "
+                    "for it: stack flat, keep exactly one deep well, avoid small clears while the board is clean. Repair "
+                    "holes and fill a second well at once. Keep the stack at about half the board height or lower. "
+                    "A stack reaching the top loses the game.")
+
+
+def instructions() -> str:
+    return INSTRUCTIONS_OWN if OPTION_LEVEL >= 3 else INSTRUCTIONS_FULL
 
 
 def board_text(board, margin: int = 2) -> str:
@@ -81,7 +94,7 @@ def option_text(game: Game, p: Placement) -> str:
 def to_request(game: Game, placements: list[Placement] | None = None, model: str = "kev-latest", value: bool = False) -> dict:
     """The move question; value=True adds "how good is this board" (a Score question) to the same pass."""
     placements = placements if placements is not None else game.placements()
-    qs = {"move": {"type": "choice", "instructions": INSTRUCTIONS,
+    qs = {"move": {"type": "choice", "instructions": instructions(),
                    "criteria": {p.key: option_text(game, p) for p in placements}}}
     if value: qs["value"] = dict(VALUE_QUESTION)
     return {"state": state_text(game), "model": model, "questions": qs}
