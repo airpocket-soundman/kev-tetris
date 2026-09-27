@@ -34,10 +34,10 @@ def move_event(game: Game, pre: list, placements: list, d, piece: str) -> dict:
 class Feed:
     """Writer side (the training loop)."""
 
-    def __init__(self, path: Path = FEED, keep: int = 30, test_interval: float = 0.4):
+    def __init__(self, path: Path = FEED, keep: int = 30, test_interval: float = 0.0):
         # keep: the latest moves stay in the file, so a reader polling slower than the moves come loses none of them.
-        # test_interval: a test move is published no sooner than this after the previous one (the test game waits):
-        # the stream draws every test move instead of jumping several at once (the 0.8B answers in ~0.2 s)
+        # test_interval: a test move is published no sooner than this after the previous one (the test game waits).
+        # Off: the screen keeps up with the games instead (relay every move, the page shortens its animations)
         self.path, self.seq, self.recent, self.keep = path, 0, [], keep
         self.test_interval, self.last_test = test_interval, 0.0
         self.lock = threading.Lock()
