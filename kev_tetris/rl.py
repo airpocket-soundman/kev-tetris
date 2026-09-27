@@ -690,6 +690,9 @@ def run_loop(a, ctl: Control):
         if a.imagine and latest and latest.get("kind") == "imagine" and not imagined(latest):
             prev = latest   # board-imagination rounds continue from each other until the targets are met
         if a.generations and g > a.generations: break   # 0 = until stopped
+        if (a.imagine and latest and latest.get("kind") == "imagine" and imagined(latest)
+                and not any(x.get("own_share") for x in gens) and strength(latest) >= 0.95 * strength(prev)):
+            prev = latest   # the weaning starts from the imagination rounds' result, not an older, slightly stronger player
         if a.imagine and not a.demo and not imagined(prev) and not any(imagined(x) for x in gens):
             imagination_round(g, prev)
             continue
