@@ -172,3 +172,34 @@ def accuracy(base_url: str, n: int = 300, timeout: float = 300) -> dict:
         base = Counter(truth[k]).most_common(1)[0][1] / n
         out[k] = {"acc": round(right[k] / n, 3), "baseline": round(base, 3)}
     return out
+
+
+def _own_moves(args):
+    """Positions from the teacher's own games (its two-piece search, 10% random moves), each labelled with the
+    teacher's move, as records without the computed outcomes (option level 3)."""
+    n, seed = args
+    from . import rl, teacher
+    reward = lambda b, f, c, d: rl.shaped_reward(b, f, c, d)
+    rng, out = random.Random(seed), []
+    while len(out) < n:
+        g = Game(seed=rng.randrange(1 << 30))
+        stops = set(range(rng.randrange(2), 300, 2))   # every other position of a teacher game (cheap: one search per move)
+        last = max(stops)
+        while not g.over and g.pieces <= last and len(out) < n:
+            ps = g.placements()
+            key = teacher.search_label(g, ps, reward, rl.potential, 8)
+            if g.pieces in stops:
+                out.append(interface.to_record(g, ps, key, level=3))
+            move = rng.choice(ps) if rng.random() < 0.1 else next(p for p in ps if p.key == key)
+            g.step(move)
+    return out
+
+
+def own_moves(n: int, seed: int, workers: int = 1) -> list[dict]:
+    """n teacher-labelled move records without computed outcomes, made on the CPU (weaning data at scale)."""
+    if workers <= 1: return _own_moves((n, seed))
+    from concurrent.futures import ProcessPoolExecutor
+    k = -(-n // workers)
+    with ProcessPoolExecutor(workers) as ex:
+        parts = ex.map(_own_moves, [(k, seed * 1000 + i) for i in range(workers)])
+    return [x for part in parts for x in part][:n]

@@ -686,6 +686,11 @@ def run_loop(a, ctl: Control):
         elif a.branch_from is not None: pool = [x for x in gens if x["gen"] == a.branch_from]
         else: pool = same_rules or [x for x in gens if x.get("eval")]
         prev = max(pool, key=strength)
+        weaning = [x for x in gens if x.get("own_share") and x.get("eval_own")]
+        if weaning and not a.demo:
+            # while weaning, the lineage continues within the weaning generations, chosen by how well they play without
+            # the computed outcomes (gen 51 went back to gen 46 by the full test and lost gen 50's weaning)
+            prev = max(weaning[-a.parent_window:], key=lambda x: (x["eval_own"].get("score_per_piece", 0), strength(x)))
         latest = max((x for x in gens if x.get("eval")), key=lambda x: x["gen"], default=None)
         if a.imagine and latest and latest.get("kind") == "imagine" and not imagined(latest):
             prev = latest   # board-imagination rounds continue from each other until the targets are met
@@ -818,6 +823,10 @@ def run_loop(a, ctl: Control):
             if a.imagine_mix:   # board-imagination probes keep training the predictions Kev now has to make itself
                 from . import imagine
                 recs += imagine.dataset(a.imagine_mix, 5000 + g, workers=a.rollout_workers)
+            if share and a.own_extra:   # weaning at scale: teacher-labelled positions without computed outcomes (CPU)
+                from . import imagine
+                ctl.report(force=True, phase="train", detail=f"予測なしの学習データを {a.own_extra} 件作成中", progress=None)
+                recs += imagine.own_moves(a.own_extra, 7000 + g, workers=a.rollout_workers)
             rng.shuffle(recs)
             print(f"[gen {g}] rl: {len(diff)} disagreements, {len(same)} agreements, {len(vrecs)} value positions, "
                   f"level means {[round(m, 1) for m in means]}", flush=True)
@@ -935,6 +944,7 @@ def main(argv=None):
     ap.add_argument("--imagine_eval", type=int, default=300, help="probes in the imagination test")
     ap.add_argument("--own_share_start", type=float, default=0.0, help="weaning: first share of games/records without computed outcomes (0 = off)")
     ap.add_argument("--own_advance", type=float, default=0.9, help="weaning: advance when the own-judgement test reaches this share of the full test")
+    ap.add_argument("--own_extra", type=int, default=2500, help="weaning: teacher-labelled records without computed outcomes made on the CPU per generation")
     ap.add_argument("--own_eval_games", type=int, default=3, help="weaning: test games without computed outcomes")
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
