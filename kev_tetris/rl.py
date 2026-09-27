@@ -39,6 +39,7 @@ LINE_REWARD = {0: 0.0, 1: 1.0, 2: 3.0, 3: 5.0, 4: 16.0}
 LINE_REWARD_SAFE = {0: 0.0, 1: 0.2, 2: 0.8, 3: 3.0, 4: 16.0}
 SAFE_HEIGHT = 10
 # v5: a clean board (no hole, no overhang, no second well) below SAFE_HEIGHT builds for Tetrises: smaller clears cost
+TETRIS_READY = 4.0    # v5: a move that completes a Tetris setup (from gen 41)
 MISSED_TETRIS = 8.0   # v5: an I piece placed elsewhere while a Tetris was ready
 LINE_REWARD_CLEAN = {0: 0.0, 1: -3.0, 2: -3.0, 3: -1.5, 4: 16.0}
 SURVIVE_HEIGHT = 10   # v4 from gen 19: above this the potential falls with the square of the excess height
@@ -163,6 +164,9 @@ def shaped_reward(before: dict, after: dict, cleared: int, died: bool, tspin: bo
         if cleared and tspin: r += 4.0 * cleared           # T-spin single/double/triple
         # holes and overhangs cost every move they stay (gen 17: 0.15, gen 19: 0.35): repair them at once, then build
         r -= (0.6 if v5 else 0.35) * (after["enclosed"] + after["overhang"])
+        if v5:   # a Tetris set up (an I would clear 4 rows now) pays; spoiling one without the Tetris costs as much
+            if after["tetris_ready"] and not before["tetris_ready"]: r += TETRIS_READY
+            elif before["tetris_ready"] and not after["tetris_ready"] and cleared != 4: r -= TETRIS_READY
         if v5:   # a second well (or a 2-3 wide dip) costs every move it stays; filling it pays
             r -= 0.1 * after["extra_wells"]
             r += 0.3 * max(0, before["extra_wells"] - after["extra_wells"])

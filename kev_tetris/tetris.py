@@ -281,7 +281,20 @@ def board_features(board):
             "bumpiness": sum(abs(hs[i] - hs[i + 1]) for i in range(WIDTH - 1)), "wells": wells_depth(hs),
             "enclosed": enclosed, "overhang": overhang, "ready_rows": ready_rows(board, hs), "max_well": max_well_depth(hs),
             "row_transitions": row_t, "col_transitions": col_t, "hole_depth": hole_depth, "hole_rows": hole_rows,
-            "extra_wells": extra_wells_cumulative(hs)}
+            "extra_wells": extra_wells_cumulative(hs), "tetris_ready": tetris_ready(board, hs)}
+
+
+def tetris_ready(board, hs=None) -> bool:
+    """A vertical I would clear 4 rows now: some column x whose 4 lowest empty cells (from its top down... i.e. the rows
+    just above its height) are the only gaps of 4 otherwise full rows, with nothing above x in the way."""
+    hs = hs or column_heights(board)
+    H = len(board)
+    for x in range(WIDTH):
+        h = hs[x]
+        if h + 4 > H: continue
+        rows = [H - 1 - (h + k) for k in range(4)]            # board rows (top = 0) of the 4 cells above column x's top
+        if all(board[y][c] for y in rows for c in range(WIDTH) if c != x): return True
+    return False
 
 
 def is_tspin(board, p) -> bool:
