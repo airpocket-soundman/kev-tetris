@@ -44,13 +44,15 @@ def state_text(game: Game, next_known: bool = True) -> str:
     return (f"Tetris board, {size}, '#' filled, '.' empty, row 1 is the floor.\n"
             f"{board_text(game.board)}\n"
             f"Current piece: {game.current}. Next piece: {game.next if next_known else 'unknown'}.\n"
-            f"Column heights: {' '.join(map(str, f['heights']))}. Holes: {f['holes']}. "
-            f"Lines cleared so far: {game.lines}.")
+            f"Column heights: {' '.join(map(str, f['heights']))}. "
+            + (f"Holes: {f['holes']}. " if OPTION_LEVEL < 2 else "")   # from level 2 Kev judges holes from the board itself
+            + f"Lines cleared so far: {game.lines}.")
 
 
 # How much of a move's outcome the option text computes for Kev (set from runs/model.json "option_level").
 # 0: everything (clears, holes, overhangs, height, bumps, well, ready rows - up to gen 43)
-# 1: the cells it fills + clears, holes, overhangs      2: the cells + clears      3: the cells only
+# 1: the cells it fills + clears, holes, overhangs      2: the cells + clears (and no hole count in the board text)
+# 3: the cells only. The board itself is always shown; judging it is Kev's job
 # The aim is that Kev reads the outcome off the board itself; each level is reached once the previous one plays as well.
 OPTION_LEVEL = 0
 
