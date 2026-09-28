@@ -703,6 +703,8 @@ def run_loop(a, ctl: Control):
             # the latest one continues the lineage unless it is clearly worse: the own-judgement test is a few games, and
             # picking its maximum kept going back to one lucky generation (gens 56-58 all restarted from gen 55)
             prev = weaning[-1] if own(weaning[-1]) >= own(best) - a.own_tolerance else best
+        if a.parent_force and g == a.parent_force_at:   # a one-off restart from a chosen generation (runs/model.json)
+            prev = next(x for x in gens if x["gen"] == a.parent_force)
         latest = max((x for x in gens if x.get("eval")), key=lambda x: x["gen"], default=None)
         if a.imagine and latest and latest.get("kind") == "imagine" and not imagined(latest):
             prev = latest   # board-imagination rounds continue from each other until the targets are met
@@ -972,6 +974,8 @@ def main(argv=None):
                          "pieces away to half its points and small clears won - Tetrises fell from 12.6 to 6.2 a game")
     ap.add_argument("--rollout_focus", type=float, default=1.0,
                     help="rollout rate x this on Tetris-building positions (clean, a well >= 2, height <= 12), / this elsewhere")
+    ap.add_argument("--parent_force", type=int, default=None, help="with --parent_force_at: that generation starts from this one")
+    ap.add_argument("--parent_force_at", type=int, default=None)
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
