@@ -743,7 +743,12 @@ def run_loop(a, ctl: Control):
                 # RL: a share of the positions is set aside for rollouts after the games (CPU, many cores: the stream's
                 # Kev answers are not slowed); until then they carry the teacher's label
                 key = hand(game, ps)
-                if rl and a.rollout_rate and d is not None and rng_ro.random() < a.rollout_rate:
+                rate = a.rollout_rate
+                if a.rollout_focus != 1.0:   # Tetris-building positions (clean, a well, not high) get more of the rollouts
+                    f = board_features(game.board)
+                    building = f["enclosed"] + f["overhang"] == 0 and f["max_well"] >= 2 and f["max_height"] <= 12
+                    rate *= a.rollout_focus if building else 1.0 / a.rollout_focus
+                if rl and rate and d is not None and rng_ro.random() < rate:
                     top = [p.key for p in sorted(ps, key=lambda p: d.probs.get(p.key, 0.0), reverse=True)[:a.rollout_k]]
                     with pending_lock:
                         token = f"ro{len(pending)}"
@@ -965,6 +970,8 @@ def main(argv=None):
     ap.add_argument("--rollout_gamma", type=float, default=None,
                     help="discount inside rollouts (default --gamma). 1.0 with outcome scoring: gens 78-79 discounted a Tetris 20 "
                          "pieces away to half its points and small clears won - Tetrises fell from 12.6 to 6.2 a game")
+    ap.add_argument("--rollout_focus", type=float, default=1.0,
+                    help="rollout rate x this on Tetris-building positions (clean, a well >= 2, height <= 12), / this elsewhere")
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
