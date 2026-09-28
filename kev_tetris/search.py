@@ -111,6 +111,9 @@ def rollout_label(game: Game, placements, probs: dict, base_url: str, reward, po
     return max(worth, key=worth.get), worth
 
 
+OUTCOME_TAIL = 0.3
+
+
 def teacher_rollout(job) -> str:
     """CPU-only rollout label (from gen 39): Kev proposes the candidates (its likeliest moves, plus the teacher's), the
     teacher's two-piece search plays on after each for `depth` pieces, n times; rewards along the way + the hand potential
@@ -118,7 +121,8 @@ def teacher_rollout(job) -> str:
     needs no GPU, so it runs on many cores after the practice games without slowing the stream.
     job: (game, candidate keys, seed, depth, n, gamma, first_k) -> the best key."""
     from . import rl, teacher
-    game, cands, seed, depth, n, gamma, first_k = job
+    game, cands, seed, depth, n, gamma, first_k, *rest = job
+    outcome = bool(rest and rest[0] == "outcome")   # v6: judge by the points actually scored (+ death), not the shaping
     rng = random.Random(seed)
     reward = lambda b, f, c, d: rl.shaped_reward(b, f, c, d)
     worth = {}
@@ -130,14 +134,20 @@ def teacher_rollout(job) -> str:
             move = next(p for p in g.placements() if p.key == key)
             total, disc = 0.0, 1.0
             for step in range(depth + 1):
-                before = board_features(g.board)
+                before, score0 = board_features(g.board), g.score
                 cleared = g.step(move)
-                total += disc * reward(before, board_features(g.board), cleared, g.over); disc *= gamma
+                if outcome:   # game points in hundreds (a single 1, a Tetris 8), a lost game -30
+                    total += disc * ((g.score - score0) / 100 - (30.0 if g.over else 0.0))
+                else:
+                    total += disc * reward(before, board_features(g.board), cleared, g.over)
+                disc *= gamma
                 if g.over or step == depth: break
                 ps = g.placements()
                 k = teacher.search_label(g, ps, reward, rl.potential, first_k)
                 move = next(p for p in ps if p.key == k)
-            if not g.over: total += disc * rl.potential(board_features(g.board))
+            # the board left at the horizon: its hand potential (a light weight when judging by outcome - the game
+            # goes on after the cut, a wrecked board must still count)
+            if not g.over: total += disc * (OUTCOME_TAIL if outcome else 1.0) * rl.potential(board_features(g.board))
             total_all += total
         worth[key] = total_all / n
     return max(worth, key=worth.get)

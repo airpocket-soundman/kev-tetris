@@ -748,7 +748,7 @@ def run_loop(a, ctl: Control):
                     with pending_lock:
                         token = f"ro{len(pending)}"
                         pending.append((copy.deepcopy(game), list(dict.fromkeys(top + [key])), rng_ro.randrange(1 << 30),
-                                        a.rollout_depth, a.rollout_n, a.gamma, a.teacher_first_k))
+                                        a.rollout_depth, a.rollout_n, a.gamma, a.teacher_first_k, a.rollout_score))
                     return key, token
                 return key
             if not ((a.teacher or rl) and not a.demo and not rl_means): search = None
@@ -959,6 +959,8 @@ def main(argv=None):
     ap.add_argument("--own_extra", type=int, default=2500, help="weaning: teacher-labelled records without computed outcomes made on the CPU per generation")
     ap.add_argument("--own_tolerance", type=float, default=3.0, help="weaning: the latest generation stays the parent within this many points of the best own-judgement score")
     ap.add_argument("--own_eval_games", type=int, default=5, help="weaning: test games without computed outcomes")
+    ap.add_argument("--rollout_score", choices=["shaped", "outcome"], default="shaped",
+                    help="how rollouts judge a move: the shaped reward (v5) or the points actually scored + death (v6)")
     ap.add_argument("--rollout_workers", type=int, default=12, help="RL: CPU processes for the rollouts")
     ap.add_argument("--rollout_k", type=int, default=3, help="RL: Kev's likeliest moves the rollouts compare")
     ap.add_argument("--rollout_depth", type=int, default=10, help="RL: pieces Kev plays on after each move")
